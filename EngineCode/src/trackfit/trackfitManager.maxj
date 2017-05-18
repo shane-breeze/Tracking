@@ -20,10 +20,7 @@ public class trackfitManager extends CustomManager{
 		String SimBuild = System.getenv("SimBuild");
 		String synthesis;
 		if(SimBuild.equals("true")){
-			boolean trunc = System.getenv("truncation").equals("true");
-			String truncString = trunc ? " with " : " without ";
-			System.out.println("Building sim" + truncString + "truncation.");
-			makeSim(args, trunc);
+			makeSim(args);
 		}else{
 			synthesis = System.getenv("Synthesis");
 			GenerationMode gm;
@@ -38,16 +35,13 @@ public class trackfitManager extends CustomManager{
 
 	}
 
-	public trackfitManager(EngineParameters engineParams, boolean trunc) {
+	public trackfitManager(EngineParameters engineParams) {
 		super(engineParams);
 		this.getCurrentKernelConfig().debug.setEnableLatencyAnnotation(true);
+		config.setDefaultStreamClockFrequency(250);
 		KernelBlock SimInput = addKernel(new SimInput(makeKernelParameters("SimInput")));
 		KernelBlock KFKernel;
-		if(trunc){
-			KFKernel = addKernel(new TrackFitKernel(makeKernelParameters("KalmanFilterWorker"), true));
-		}else{
-			KFKernel = addKernel(new TrackFitKernel(makeKernelParameters("KalmanFilterWorker"), true));
-		}
+		KFKernel = addKernel(new TrackFitKernel(makeKernelParameters("KalmanFilterWorker"), true));
 		KernelBlock SimOutput = addKernel(new SimOutput(makeKernelParameters("SimOutput")));
 
 		DFELink stubIn = addStreamFromCPU("stubIn");
@@ -97,9 +91,9 @@ public class trackfitManager extends CustomManager{
 		manager.build();
 	}
 
-	private static void makeSim(String[] args, boolean trunc){
+	private static void makeSim(String[] args){
     	EngineParameters engineParameters = new EngineParameters(args);
-    	trackfitManager manager = new trackfitManager(engineParameters, trunc);
+    	trackfitManager manager = new trackfitManager(engineParameters);
     	manager.setParameter("useNewClockWidthAssignment", "true");
     	manager.setParameter("manager.use_new_clock_width_assignment", "true");
     	manager.createSLiCinterface(interfaceDefault());
