@@ -1,0 +1,147 @@
+package formats;
+
+import com.maxeler.maxcompiler.v2.kernelcompiler.Kernel;
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelLib;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStruct;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStructType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStructType.StructFieldType;
+
+public class Stub extends KernelLib{
+
+	public enum ModuleType{
+		PSBARREL1 (0, 0.1, 2.66, 1.44562),
+		PSBARREL23 (1, 0.1, 1.66, 1.44562),
+		PSENDCAP (2, 0.1, 4, 1.44562),
+		TWOSBARREL (3, 0.09, 1.8, 50.25),
+		TWOSENDCAPOUTER (4, 0.09, 1.8, 50.25),
+		TWOSENDCAPINNER (5, 0.09, 4, 50.25);
+		private int ID;
+		private double pitch;
+		private double sep;
+		private double length;
+		private ModuleType(int ID, double pitch, double sep, double length){
+			this.ID = ID;
+			this.pitch = pitch;
+			this.sep = sep;
+			this.length = length;
+		}
+		public int ID(){ return this.ID; }
+		public double pitch(){ return this.pitch; }
+		public double sep(){ return this.sep; }
+		public double length(){ return this.length; }
+	}
+
+	protected static final DFEType tZ = dfeInt(13); // True int
+	protected static final DFEType tR = dfeUInt(11); // True int
+	protected static final DFEType tPhi = dfeInt(14);//dfeFix(0, 13, SignMode.TWOSCOMPLEMENT); // I think
+	protected static final DFEType tLayerID = dfeUInt(3);
+	protected static final DFEType tValid = dfeUInt(1);
+
+	private static final StructFieldType sftZ = new StructFieldType("z", tZ);
+	private static final StructFieldType sftR = new StructFieldType("r", tR);
+	private static final StructFieldType sftPhi = new StructFieldType("phi", tPhi);
+	private static final StructFieldType sftLayer = new StructFieldType("layerID", tLayerID);
+	private static final StructFieldType sftValid = new StructFieldType("valid", tValid);
+	protected static final DFEStructType stStubIn = new DFEStructType(sftZ, sftR, sftPhi, sftLayer, sftValid);
+
+	private final DFEStruct data;
+	private final Kernel kernel;
+
+	public Stub(Kernel owner){
+		super(owner);
+		kernel = owner;
+		data = stStubIn.newInstance(owner);
+	}
+
+	public Stub(Kernel owner, DFEStruct data){
+		super(owner);
+		kernel = owner;
+		this.data = data;
+	}
+
+	public static Stub input(Kernel owner, String name){
+		owner.io.forceInputsTogether(name+"_z", name+"_r", name+"_phi", name+"_layerID", name+"_valid");
+		DFEStruct data = stStubIn.newInstance(owner);
+		data["z"] <== owner.io.input(name+"_z", tZ);
+		data["r"] <== owner.io.input(name+"_r", tR);
+		data["phi"] <== owner.io.input(name+"_phi", tPhi);
+		data["layerID"] <== owner.io.input(name+"_layerID", tLayerID);
+		data["valid"] <== owner.io.input(name+"_valid", dfeUInt(1));
+		return new Stub(owner, data);
+	}
+
+	public DFEVar z(){ return data["z"]; }
+	public DFEVar r(){ return data["r"]; }
+	public DFEVar phi(){ return data["phi"]; }
+	public DFEVar layerID(){ return data["layerID"]; }
+	public DFEVar valid(){ return data["valid"]; }
+	public DFEStruct data(){ return data; }
+	public static DFEStructType stStub(){ return stStubIn; }
+
+	/*public DFEVar barrel(){*/
+		/* This construct ensures that the bool is not calculated every time the function is called */
+		/*if( this.barrel == null ){
+			DFEVar t = kernel.constant.var(true);
+			DFEVar f = kernel.constant.var(false);
+			this.barrel = control.mux(moduleType(), new DFEVar[]{t, t, f, t, f, f, f, f}); // LUT of which modules are barrel/EC
+		}
+		return barrel;
+	}*/
+
+	/***
+	 * Return the error in strip width (phi) direction
+	 * @return
+	 */
+	/*public DFEVar sigmaLength(){
+		DFEVar[] sigmaLengths = new DFEVar[ModuleType.values().length];
+		for(ModuleType module : ModuleType.values())
+			sigmaLengths[module.ID()] = constant.var(tSigmaLength, module.length() * Constants.rMult() / Math.sqrt(12));
+		return control.mux(moduleType(), sigmaLengths);
+	}*/
+
+	/***
+	 * Return the error in strip pitch (phi) direction
+	 * @return
+	 */
+	/*public DFEVar sigmaPitch(){
+		if(this.sigmaPitch == null){
+			DFEVar[] pitches = new DFEVar[ModuleType.values().length];
+			for(ModuleType module : ModuleType.values())
+				pitches[module.ID()] = constant.var(tSigmaPitch, module.pitch() * Constants.phiMult() * Constants.rMult() / Math.sqrt(12));
+			this.sigmaPitch = control.mux(moduleType(), pitches);
+		}
+		return this.sigmaPitch;
+	}*/
+
+	public static ModuleType moduleType(double r_mm, double z_mm){
+		ModuleType mod;
+		if(z_mm < 1200){
+			// Barrel
+			int i, j=0;
+			for(i = 0; i < Constants.barrelRBoundaries().length; i++){
+				if(r_mm > Constants.barrelRBoundaries()[i])
+					j = i;
+			}
+			if(j > 3)
+				j = 3; // Above 3 all modules are 2S Barrel
+			ModuleType mods[] = {ModuleType.PSBARREL1, ModuleType.PSBARREL23, ModuleType.PSBARREL23, ModuleType.TWOSBARREL};
+			mod = mods[j];
+		}else{
+			// Endcap
+			int i, j=0;
+			for(i = 0; i < Constants.barrelRBoundaries().length; i++){
+				if(r_mm > Constants.barrelRBoundaries()[i])
+					j = i;
+			}
+			// Below r = 600 ( j==2 ) mod = PS endcap
+			if(j <= 2)
+				mod = ModuleType.PSENDCAP;
+			else
+				mod = ModuleType.TWOSENDCAPINNER; // Don't care about sep. so don't differentiate inner and outer
+		}
+		return mod;
+	}
+
+}

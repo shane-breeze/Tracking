@@ -1,0 +1,445 @@
+package trackfit;
+
+import matrix.FOM;
+import matrix.LinAlg;
+import matrix.Matrix;
+import matrix.Scalar;
+import matrix.Vector;
+
+import com.maxeler.maxcompiler.v2.kernelcompiler.Kernel;
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelLib;
+import com.maxeler.maxcompiler.v2.kernelcompiler.Optimization;
+import com.maxeler.maxcompiler.v2.kernelcompiler.RoundingMode;
+import com.maxeler.maxcompiler.v2.kernelcompiler.op_management.MathOps;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.KernelMath;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.memory.Memory;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEFix;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEFix.SignMode;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStruct;
+
+import division.Divider;
+import formats.Constants;
+import formats.State;
+
+public abstract class KFWorker extends KernelLib{
+
+	KalmanState stateIn;
+	KalmanStub stub;
+	Kernel kernel;
+	boolean simulation;
+	boolean doWatches;// = true & simulation;
+
+	public KFWorker(Kernel owner, KalmanState state, KalmanStub stub, boolean simulation){
+		super(owner);
+		this.kernel = owner;
+		this.stub = stub;
+		this.stateIn = state;
+		this.simulation = simulation;
+		this.doWatches = true & simulation;
+	}
+
+	public KalmanState update(){
+		optimization.pushEnableBitGrowth(true);
+		stub.dQoverPt(stateIn.metadata("MBIN_HT"));
+		LinAlg.pushDSPPipeliningFactor(0.8); // Fewer registers for DSPs
+		Vector x = stateIn.x();
+		System.out.println("x = ");
+		x.print();
+		Vector d = d(stub);
+		Matrix H = H(stub);
+		ConstrainedCovarianceMatrix pxx = stateIn.pxx();
+		//optimization.pushFixOpMode(Optimization.bitSizeExact(18), Optimization.offsetLargestMsb(), MathOps.ALL);
+		Matrix pxd = pxdOpt(pxx, stub);//(Matrix) pxx.multiply( LinAlg.transpose(H) );
+		//optimization.popFixOpMode(MathOps.ALL);
+		System.out.println("pxd:");
+		pxd.print();
+		System.out.println("pdd_meas:");
+		pdd(stub).print();
+
+		//Matrix pdd = pddOpt(pxx, stub);
+		//System.out.println("pdd: ");
+		//pdd.print();
+		// Take the inverse
+		Divider.setWatch(false);
+		Divider.setDSPPipelineFactor(0.5);
+		Divider.setLowLatency(true);
+		Matrix pddInv = pddInvOpt(pxx, stub);
+		System.out.println("pddInv: ");
+		pddInv.print();
+		//optimization.pushFixOpMode(Optimization.bitSizeExact(25), Optimization.offsetExact(-20), MathOps.ALL);
+		//optimization.pushFixOpMode(Optimization.bitSizeExact(18), Optimization.offsetNoOverflow(), MathOps.ALL);
+        //FOM.maxTC(10, 25).push(this);
+		LinAlg.pushDSPPipeliningFactor(0.75);
+		Matrix K = (Matrix) pxd.multiplyFOMAll(pddInv, K_FOM());
+		LinAlg.popDSPPipeliningFactor();
+		Matrix K25b = K_cast(K); // truncate K to 25 bits for state update
+
+        //FOM.pop();
+		//optimization.popFixOpMode(MathOps.ALL);
+		System.out.println("K:");
+		K.print();
+		System.out.println("K25b:");
+		K25b.print();
+		//optimization.pushFixOpMode(Optimization.bitSizeExact(25), Optimization.offsetExact(-13), MathOps.MUL);
+		//optimization.pushFixOpMode(Optimization.bitSizeExact(18), Optimization.offsetNoOverflow(), MathOps.MUL);
+
+		LinAlg.storeIntermediates(true);
+		Matrix KH = (Matrix) K.multiplyFOMAll(H, KH_FOM());
+		LinAlg.storeIntermediates(false);
+		//optimization.popFixOpMode(MathOps.MUL);
+		System.out.println("KH: ");
+		KH.print();
+		//optimization.pushFixOpMode(Optimization.bitSizeExact(25), Optimization.offsetLargestMsb(), MathOps.ALL);
+
+		Matrix I_min_KH = (Matrix)(Constants.Identity(getKernel(), 4).subFOM(KH, KH_FOM()));//(Constants.Identity(this.kernel, 4) - KH);
+		//optimization.popFixOpMode(MathOps.ALL);
+		System.out.println("I_min_KH: ");
+		I_min_KH.print();
+		LinAlg.pushDSPPipeliningFactor(0.75);
+		optimization.pushRoundingMode(RoundingMode.TONEAR);
+		Matrix IKH_x_pxx = (Matrix) (I_min_KH * pxx.toMatrix() );
+		optimization.popRoundingMode();
+		System.out.println("pxx:");
+		pxx.toMatrix().print();
+		System.out.println("I_min_KH_x_pxx:");
+		IKH_x_pxx.print();
+
+		//Matrix IKH_x_pxx_x_IKH = (Matrix) (IKH_x_pxx * LinAlg.transpose(I_min_KH));
+		//Matrix C = (Matrix) (IKH_x_pxx_x_IKH + (K25b * pdd(stub) * LinAlg.transpose(K25b)));
+		//System.out.println("IKH_x_pxx_x_IKH:");
+		//IKH_x_pxx_x_IKH.print();
+
+		//Matrix KVK = (Matrix) K.multiply(pdd(stub)).multiply(LinAlg.transpose(K));
+		//Matrix C_up = (Matrix) IKH_x_pxx_x_IKH.add(KVK);
+		//ConstrainedCovarianceMatrix pxxa = ConstrainedCovarianceMatrix.toCCM( IKH_x_pxx_x_IKH ).positivify();
+		//ConstrainedCovarianceMatrix pxxa = ConstrainedCovarianceMatrix.toCCM(C_up).positivify();
+		//ConstrainedCovarianceMatrix pxxa = (ConstrainedCovarianceMatrix.toCCM(((Matrix) pxx.toMatrix().sub( K.multiply( LinAlg.transpose(pxd) ) )))).positivify();
+		ConstrainedCovarianceMatrix pxxa = ConstrainedCovarianceMatrix.toCCM(IKH_x_pxx).positivifyCast(State.PxxFOM());
+		//ConstrainedCovarianceMatrix pxxa = ConstrainedCovarianceMatrix.toCCM(C).positivifyCast(State.PxxFOM());
+
+		LinAlg.popDSPPipeliningFactor();
+
+		//ConstrainedCovarianceMatrix pxxa = ConstrainedCovarianceMatrix.toCCM(C_up).positivify();
+
+		/* Update the track parameters */
+		optimization.pushFixOpMode(Optimization.bitSizeExact(24), Optimization.offsetExact(-9), MathOps.ALL);
+		LinAlg.pushDSPPipeliningFactor(0.75);
+		Vector Hx = (Vector) (H * x);
+		LinAlg.popDSPPipeliningFactor();
+		System.out.println("H");
+		H.print();
+		System.out.println("Hx");
+		Hx.print();
+		optimization.popFixOpMode(MathOps.ALL);
+		optimization.pushFixOpMode(Optimization.bitSizeExact(18), Optimization.offsetExact(-9), MathOps.ALL);
+		Vector residual = (Vector) d.sub(Hx);
+		optimization.popFixOpMode(MathOps.ALL);
+		System.out.println("residual:");
+		residual.print();
+		Vector K_x_resid = (Vector) (K25b * residual);
+		System.out.println("K x residual:");
+		K_x_resid.print();
+		Vector xa = (Vector) x.add(K_x_resid);
+		System.out.println("xa:");
+		xa.print();
+		DFEVar[] xaTruncStruct = new DFEVar[4];
+		for(int i = 0; i < 4; i++){
+			xaTruncStruct[i] = State.vector.values()[i].fom().wrapProtectedCast(xa.data(i));
+		}
+		Vector xaTrunc = new Vector(xaTruncStruct);
+		/* Track Parameter update done */
+
+		/* Update the chi squared */
+		/* TODO truncation here needs more consideration */
+        optimization.pushFixOpMode(Optimization.bitSizeExact(25), Optimization.offsetExact(-15), MathOps.ALL);
+        //DFEVar csIncP1 = residual.data(1) * pddInv.data(1, 1);
+        Vector csIncP1 = (Vector) (LinAlg.transpose(residual) * pddInv_cast(pddInv));
+        //csIncP1.print();
+        optimization.pushFixOpMode(Optimization.bitSizeExact(25), Optimization.offsetExact(-12), MathOps.ALL);
+        Scalar χSqInc = (Scalar) (csIncP1 * residual);
+        //DFEVar χSqInc = csIncP1 * residual.data(0);
+        optimization.popFixOpMode(MathOps.ALL);
+        optimization.popFixOpMode(MathOps.ALL);
+        DFEVar csVal = χSqInc.value() < 0 ? 1000 : χSqInc.value();
+        //DFEVar csVal = χSqInc < 0 ? 1000 : χSqInc;
+        //System.out.println("χSqInc.value: " + χSqInc.value().getType().getTotalBits());
+        //optimization.pushFixOpMode(Optimization.bitSizeExact(19), Optimization.offsetExact(-9), MathOps.ALL);
+		DFEVar χSqUp = stateIn.chiSquared() + csVal;
+		double χSqMaxVal = Math.pow(2, 10) - Math.pow(2, -7);
+		χSqUp = χSqUp > χSqMaxVal ? χSqMaxVal : χSqUp;
+		χSqUp = χSqUp.cast(State.covariance.CHISQUARED.type());
+		//optimization.popFixOpMode(MathOps.ALL);
+		/* Chi Squared updated */
+
+		/* Calculate the m and c bin for this state */
+		// cBin First
+
+		System.out.println("1/2r = " + x.data(0));
+		optimization.pushFixOpMode(Optimization.bitSizeExact(18), Optimization.offsetExact(-5), MathOps.MUL);
+		DFEVar phi58 = xaTrunc.data(1) - Constants.rMmToHWU(Constants.rOfPhi()) * xaTrunc.data(0);
+		optimization.popFixOpMode(MathOps.MUL);
+		System.out.println("phi58 = " + phi58);
+		DFEVar cBin = Constants.phi58ToC(phi58);
+		DFEVar cBinFloor = KernelMath.floor(cBin).cast(State.metadata.CBIN_HT.type());
+		int cBinMinVal = (int) - Math.pow(2, State.metadata.CBIN_HT.type().getTotalBits() - 1);
+		int cBinMaxVal = (int) Math.pow(2,State.metadata.CBIN_HT.type().getTotalBits() - 1);
+		int cBinFloorMaxVal = cBinMaxVal - 1;
+		DFEVar cBinTooLow = cBin < cBinMinVal;
+		DFEVar cBinTooHigh = cBin >= cBinMaxVal;
+		DFEVar cBinBoundedL = cBinTooLow ? cBinMinVal : cBinFloor;
+		DFEVar cBinBoundedH = cBinTooHigh > cBinFloorMaxVal ? cBinMaxVal : cBinFloor;
+		DFEVar cBinBounded = cBin < 0 ? cBinBoundedL : cBinBoundedH;
+		DFEVar cBinCompatible = cBinBounded === stateIn.metadata(State.metadata.CBIN_HT.name());
+
+		// mBin Second
+		DFEVar mBin = Constants.inv2RToM(xaTrunc.data(0));
+		DFEVar mBinFloor = KernelMath.floor(mBin).cast(State.metadata.MBIN_HT.type());
+		int mBinMinVal = (int) - Math.pow(2, State.metadata.MBIN_HT.type().getTotalBits() - 1);
+		int mBinMaxVal = (int) Math.pow(2, State.metadata.MBIN_HT.type().getTotalBits() - 1);
+		int mBinFloorMaxVal = mBinMaxVal - 1;
+		DFEVar mBinTooLow = mBin < mBinMinVal;
+		DFEVar mBinTooHigh = mBin >= mBinMaxVal;
+		DFEVar mBoundedL = mBinTooLow ? mBinMinVal : mBinFloor;
+		DFEVar mBoundedH = mBinTooHigh > mBinFloorMaxVal ? mBinMaxVal : mBinFloor;
+		DFEVar mBinBounded = mBin < 0 ? mBoundedL : mBoundedH;
+		DFEVar mBinCompatible = mBinBounded === stateIn.metadata(State.metadata.MBIN_HT.name());
+
+		DFEVar mcBinCompatible = cBinCompatible & mBinCompatible;
+		DFEStruct mcBin = State.stMCBin().newInstance(this);
+		mcBin[State.MCBin.CBIN.name()] <== cBinBounded;
+		mcBin[State.MCBin.MBIN.name()] <== mBinBounded;
+		mcBin[State.MCBin.MCCOMPATIBLE.name()] <== mcBinCompatible;
+
+		/*--- Eta sector compatibility ---*/
+        DFEVar z50 = x.data(2) * Constants.rHWUToMm(Constants.rOfZ()) + x.data(3);
+        Memory<DFEVar> z50LMem = mem.alloc(dfeFixMax(18, 2900, SignMode.TWOSCOMPLEMENT), (int)Math.pow(2, 5));
+        Memory<DFEVar> z50HMem = mem.alloc(dfeFixMax(18, 2900, SignMode.TWOSCOMPLEMENT), (int)Math.pow(2, 5));
+        DFEVar etaSecAddr = stateIn.metadata(State.metadata.ZSIGN.name()) # stateIn.metadata(State.metadata.SECTORID.name());
+        DFEVar z50L = z50LMem.read(etaSecAddr);
+        DFEVar z50H = z50HMem.read(etaSecAddr);
+        DFEVar etaCompatible = (z50L < z50) & (z50 <= z50H);
+        double[] z50Ls = new double[(int)Math.pow(2, 5)];
+        double[] z50Hs = new double[(int)Math.pow(2, 5)];
+        for(int i = 0; i < Math.pow(2, 4); i++){
+        	for(int j = 0; j < 2; j++){
+        		int addr = i + (int)Math.pow(2, 4) * j;
+		        if(i < 9){ // then a valid sector
+		        	//int sign = j == 0 ? 1 : -1;
+		            //int iSector = (sign+1) * i + Constants.eta
+		            int iSector = j == 1 ? 8 - i : i + 9;
+		            //System.out.println("iSec = " + iSector);
+		            z50Ls[addr] = Constants.rMmToHWU(Constants.sectorZ50L(iSector));
+		            z50Hs[addr] = Constants.rMmToHWU(Constants.sectorZ50H(iSector));
+		            //System.out.println("z50L, z50H = " + z50Ls[addr] +", "+z50Hs[addr]);
+		        }else{
+		        	z50Ls[addr] = 0;
+		            z50Hs[addr] = 0;
+		        }
+        	}
+		}
+		z50LMem.setContents(z50Ls);
+		z50HMem.setContents(z50Hs);
+		DFEVar etaPhiSectorCompatible = etaCompatible & ~(cBinTooHigh | cBinTooLow);
+		/* Perform cuts on the chi squared and z0 value */
+		// If there is only 0 or 1 stub, it is not cut
+		optimization.pushFixOpMode(Optimization.bitSizeExact(stateIn.metadata("LAYERID").getType().getTotalBits() + 1), Optimization.offsetExact(0), MathOps.SUB);
+		DFEVar nStubs = stateIn.metadata("LAYERID") - stateIn.metadata("NSKIPPEDLAYERS");
+		optimization.popFixOpMode(MathOps.SUB);
+		DFEVar innerLayer = nStubs < 2;
+		// χ² cut
+		DFEVar χSqLim = control.mux(nStubs.cast(dfeUInt(3)).pack(), Constants.chiSquaredCuts(this.kernel));
+		DFEVar χSqCut = (χSqUp < χSqLim) | innerLayer;
+		// Beam spot cut
+		DFEVar z0Cut = (KernelMath.abs(xaTrunc.data(3)) < Constants.rMmToHWU(Constants.beamSpot())) | innerLayer;
+		// Pt cut
+		DFEVar ptCut = (KernelMath.abs(xaTrunc.data(0)) < Constants.inv2RToHWU(Constants.ptToInv2R(Constants.ptCut()))) | innerLayer;
+		// PS Layer cut
+		DFEVar sufficientPS = ~((nStubs === 2) & (stub.r() > Constants.rMmToHWU(600)));
+		// Pack them
+		DFEStruct cuts = State.stCuts().newInstance(this);
+		cuts[State.Cuts.ChiSquaredCut.name()] <== χSqCut;
+		cuts[State.Cuts.pTCut.name()] <== ptCut;
+		cuts[State.Cuts.z0Cut.name()] <== z0Cut;
+		cuts[State.Cuts.mBinInRange.name()] <== (mBinTooLow | mBinTooHigh);
+		cuts[State.Cuts.sufficientPS.name()] <== sufficientPS;
+		cuts[State.Cuts.SectorCut.name()] <== constant.var(dfeUInt(1), 1);
+
+		/* End of Cuts */
+
+		System.out.println("doWatches = " + doWatches);
+		// Watches
+		if(doWatches){//simulation){
+			//stateIn.metadata("MBIN_HT").simWatch("mBin_HT");
+			//stub.pdd00(stateIn).simWatch("pddMeas00");
+			//stub.pdd11(stateIn).simWatch("pddMeas11");
+			//stub.sigmaLengthSq().simWatch("sigmaLengthSq");
+			//stub.dQoverPt(stateIn.metadata("MBIN_HT")).simWatch("dQoverPt");
+			//pxd.watch("pxd");
+			//toInt(stub.dPhiLUT(stub.r())).simWatch("dPhiLut");
+			//toInt(stub.dQoverPt(stateIn.metadata("MBIN_HT"))).simWatch("dQOverPt");
+			stateIn.metadata(State.metadata.MBIN_HT.name()).simWatch("Mbin");
+			stateIn.pxx().toMatrix().toBits().watch("Pxx_in");
+			pxd.toBits().watch("pxd");
+			//pdd(stub).watch("pdd_meas");
+			//stub.sigmaPhi().simWatch("sigmaPhi");
+			//stub.rInv().simWatch("rInv");
+			//stub.rSquared().simWatch("rSquared");
+			//pdd.watch("pdd");
+			pddInv.toBits().watch("pddInv");
+			pddInv_cast(pddInv).watch("pddInv25b");
+			//H.watch("H");
+			//d.watch("d");
+			//Hx.watch("Hx");
+			K.toBits().watch("K");
+			K25b.toBits().watch("K25b");
+			Hx.toBits().watch("Hx");
+			residual.toBits().watch("residual");
+			//K_x_resid.watch("K_x_residual");
+			KH.toBits().watch("KH");
+			I_min_KH.toBits().watch("I_min_KH");
+			IKH_x_pxx.toBits().watch("IKH_x_pxxInt");
+			IKH_x_pxx.watch("IKH_x_pxx");
+			xa.toBits().watch("xa_up_internal");
+			xaTrunc.toBits().watch("xa_trunc");
+			pxxa.toBits().watch("pxxa_trunc");
+			/* χSq watches */
+			toInt(χSqInc.value()).simWatch("ChiSqInc");
+			χSqLim.simWatch("ChiSqLim");
+			toInt(χSqUp).simWatch("chiSqUp");
+			//nDoF.simWatch("nDoF");
+			/* Cut watches */
+			/*nStubs.simWatch("nStubs");
+			stateIn.metadata("NSKIPPEDLAYERS").simWatch("nSkippedLayers");
+			innerLayer.simWatch("innerLayer");
+			χSqCut.simWatch("chiSquaredCut");
+			z0Cut.simWatch("z0Cut");
+			ptCut.simWatch("ptCut");*/
+			/* m/c bin compatibility */
+			/*//stateIn.metadata("CBIN_HT").simWatch("cBinIn");
+			//stateIn.metadata("MBIN_HT").simWatch("mBinIn");
+			//phi58.simWatch("phi58");
+			//cBin.simWatch("cBin_HELIX");
+			//mBin.simWatch("mBin_HELIX");
+			//cBinBounded.simWatch("cBinOut");
+			//mBinBounded.simWatch("mBinOut");
+			//mBinCompatible.simWatch("mBinComp");
+			//cBinCompatible.simWatch("cBinComp");
+			//etaCompatible.simWatch("etaComp");
+			//z50.simWatch("z50");
+			//z50L.simWatch("z50L");
+			//z50H.simWatch("z50H");*/
+		}
+		optimization.popEnableBitGrowth();
+		DFEVar validOutput = (stateIn.valid() & stub.valid());// & (validationGate & ��SqCut) & z0WithinLim;
+		/*if(!simulation){
+			io.output("validStateIn", stateIn.valid(), dfeUInt(1));
+			io.output("validStubIn", stub.valid(), dfeUInt(1));
+			io.output("validationGate", validationGate, dfeUInt(1));
+			io.output("chiSqCut", ��SqCut, dfeUInt(1));
+			io.output("z0WithinLim", z0WithinLim, dfeUInt(1));
+			io.forceOutputsTogether("validStateIn", "validStubIn", "validationGate", "chiSqCut", "z0WithinLim", "stateOut_valid");
+		}*/
+		return new KalmanState(xaTrunc, pxxa, validOutput, stateIn.metadata(), cuts, χSqUp, mcBin);
+	}
+
+    private FOM[][] K_FOM(){
+        FOM[][] fom = new FOM[4][2];
+        boolean y = true;
+        boolean n = false;
+        fom[0][0] = new FOM(1, 35, y);
+        fom[1][0] = new FOM(20, 35, y);
+        fom[2][1] = new FOM(1, 35, y);
+        fom[3][1] = new FOM(20, 35, y);
+        fom[0][1] = new FOM();
+        fom[1][1] = new FOM();
+        fom[2][0] = new FOM();
+        fom[3][0] = new FOM();
+        return fom;
+    }
+
+    private FOM[][] stateUpdate_K_FOM(){
+        FOM[][] fom = new FOM[4][2];
+        boolean y = true;
+        boolean n = false;
+        fom[0][0] = new FOM(1, 25, y);
+        fom[1][0] = new FOM(20, 25, y);
+        fom[2][1] = new FOM(1, 25, y);
+        fom[3][1] = new FOM(20, 25, y);
+        fom[0][1] = new FOM();
+        fom[1][1] = new FOM();
+        fom[2][0] = new FOM();
+        fom[3][0] = new FOM();
+        return fom;
+    }
+
+    private Matrix K_cast(Matrix K){
+    	// Cast the 35 bit r-phi K to 25 bit for updating the state
+    	FOM[][] fom = stateUpdate_K_FOM();
+    	DFEVar[][] newData = new DFEVar[K.nRows()][K.nCols()];
+    	for(int i = 0; i < K.nRows(); i++){
+    		for(int j = 0; j < K.nCols(); j++){
+    			if(((j == 0) && ((i == 0) || (i==1))) | ((j==1) && ((i==2) || (i==3)))){
+    				newData[i][j] = fom[i][j].cast(K.data(i, j));
+    			}
+    			else{
+    				newData[i][j] = K.data(i, j);
+    			}
+    		}
+    	}
+    	return new Matrix(newData);
+    }
+
+    private Matrix pddInv_cast(Matrix pddInv){
+    	DFEVar[][] newData = new DFEVar[pddInv.nRows()][pddInv.nCols()];
+    	newData[0][0] = pddInv.data(0, 0).cast(dfeFix(3, 22, SignMode.TWOSCOMPLEMENT));
+    	newData[1][1] = pddInv.data(1, 1).cast(dfeFix(4, 21, SignMode.TWOSCOMPLEMENT));
+    	newData[0][1] = pddInv.data(0, 1);
+    	newData[1][0] = pddInv.data(1, 0);
+    	return new Matrix(newData);
+    }
+
+    private FOM[][] KH_FOM(){
+    	FOM[][] fom = new FOM[4][4];
+    	boolean y = true;
+    	fom[0][0] = new FOM(17.1, 35, y);
+    	fom[0][1] = new FOM(1, 35, y);
+    	fom[1][0] = new FOM(5395, 35, y);
+    	fom[1][1] = new FOM(19, 35, y);
+    	fom[2][2] = new FOM(15, 35, y);
+    	fom[2][3] = new FOM(0.49, 35, y);
+    	fom[3][2] = new FOM(2913, 35, y);
+    	fom[3][3] = new FOM(15, 35, y);
+    	for(int i = 0; i<4; i++){
+    		for(int j = 0; j < 4; j++){
+    			if(((i == 0 | i == 1) & (j == 2 | j == 3)) | ((i == 2 | i == 3) & (j == 1 | j == 0))){
+    				fom[i][j] = new FOM();
+    			}
+    		}
+    	}
+    	return fom;
+    }
+
+	public abstract DFEStruct convert(Vector state);
+	public abstract Vector convert(DFEStruct state);
+	public abstract Matrix H(KalmanStub hit);
+	public abstract Vector d(KalmanStub hit);
+	public abstract Matrix pdd(KalmanStub hit);
+	protected abstract Matrix truncatePdd(Matrix pdd);
+	protected abstract Matrix truncatePxd(Matrix pxd);
+	protected abstract Matrix pddOpt(ConstrainedCovarianceMatrix C, KalmanStub stub);
+	protected abstract Matrix pxdOpt(ConstrainedCovarianceMatrix C, KalmanStub stub);
+	protected abstract Matrix pddInvOpt(ConstrainedCovarianceMatrix C, KalmanStub stub);
+
+	public static DFEVar toInt(DFEVar x){
+		int nBits = x.getType().getTotalBits();
+		DFEType t = isSigned(x) ? dfeInt(nBits) : dfeUInt(nBits);
+		return x.cast(dfeRawBits(nBits)).cast(t);
+	}
+
+	private static boolean isSigned(DFEVar x){
+		DFEFix t = (DFEFix) x.getType();
+		return t.getSignMode() == SignMode.TWOSCOMPLEMENT;
+	}
+}

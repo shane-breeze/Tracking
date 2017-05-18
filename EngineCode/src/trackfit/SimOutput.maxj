@@ -1,0 +1,60 @@
+package trackfit;
+
+import com.maxeler.maxcompiler.v2.kernelcompiler.Kernel;
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelParameters;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStruct;
+
+import formats.State;
+
+public class SimOutput extends Kernel{
+
+	protected SimOutput(KernelParameters parameters){
+		super(parameters);
+		DFEStruct d = io.input("stateIn", State.stState());
+		DFEStruct dMeta = io.input("metaDataIn", State.stMetadata());
+		//d.simWatch("stateOut");
+
+        DFEStruct d0 = SimIO.stData(0).newInstance(getKernel());
+        DFEStruct d1 = SimIO.stData(1).newInstance(getKernel());
+        DFEStruct d2 = SimIO.stData(2).newInstance(getKernel());
+        DFEStruct d3 = SimIO.stData(3).newInstance(getKernel());
+        DFEStruct d4 = SimIO.stData(4).newInstance(getKernel());
+
+        d0["rInv"] <== d["rInv"];
+        d0["phi0"] <== d["phi0"];
+        d0["t"] <== d["t"];
+        d0["MBIN_HT"] <== dMeta["MBIN_HT"];
+        d0[State.metadata.LAYERID.name()] <== constant.var(State.metadata.LAYERID.type(), 0);
+        d0[State.metadata.NSKIPPEDLAYERS.name()] <== constant.var(State.metadata.NSKIPPEDLAYERS.type(), 0);
+        d1["z0"] <== d["z0"];
+
+        d1["blank"] <== constant.var(dfeUInt(28), 0);
+        d2["C22"] <== d["C22"];
+        d2["C33"] <== d["C33"];
+        d1["C01"] <== d["C01"];
+        d2["blank"] <== constant.var(dfeUInt(14), 0);
+        d3["C23"] <== d["C23"];
+        d3["chiSquared"] <== d["chiSquared"];
+        d3["valid"] <== d["valid"];
+        int nBits = d["C23"].getType().getTotalBits() + d["chiSquared"].getType().getTotalBits() + d["valid"].getType().getTotalBits();
+        for(State.metadata field : State.metadata.values()){
+        	if(field.simLink() == 3){
+        		d3[field.name()] <== constant.var(field.type(), 0);//dMeta[field.name()];
+        		nBits += d3[field.name()].getType().getTotalBits();
+        	}
+        }
+        d3["blank"] <== constant.var(dfeUInt(64-nBits), 0);
+        d4["C00"] <== d["C00"];
+        d4["C11"] <== d["C11"];
+        d4["blank"] <== constant.var(dfeUInt(64 - State.covariance.RINV.type().getTotalBits() - State.covariance.PHI0.type().getTotalBits()), 0);
+        io.output("d0", d0, SimIO.stData(0));
+        io.output("d1", d1, SimIO.stData(1));
+        io.output("d2", d2, SimIO.stData(2));
+        io.output("d3", d3, SimIO.stData(3));
+        io.output("d4", d4, SimIO.stData(4));
+
+
+        System.out.println("SimOut d3 no. bits: " + nBits);
+	}
+
+}

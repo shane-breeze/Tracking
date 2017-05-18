@@ -1,0 +1,89 @@
+package trackfit;
+
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
+
+import com.maxeler.maxcompiler.v2.kernelcompiler.Kernel;
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelLib;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStructType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStructType.StructFieldType;
+
+import formats.State;
+
+/**
+ * This class is used only for packaging stub/state data into 64-bit fields
+ * for interfacing the firmware (in simulation) with software.
+ * @author Sioni
+ *
+ */
+public class SimIO extends KernelLib{
+
+	private static final Map<String, Integer> linkMap;
+	static{
+		Map<String, Integer> map = new HashMap<String, Integer>();
+		map.put("rInv", 0);
+		map.put("phi0", 0);
+		map.put("t", 0);
+		map.put("MBIN_HT", 0);
+		map.put(State.metadata.LAYERID.name(), 0);
+		map.put(State.metadata.NSKIPPEDLAYERS.name(), 0);
+		map.put("z0", 1);
+		map.put("c01", 1);
+		linkMap = Collections.unmodifiableMap(map);
+	}
+
+	protected SimIO(Kernel owner) {
+		super(owner);
+	}
+
+	public static DFEStructType stData(int i){
+		DFEStructType stData[] = new DFEStructType[5];
+		StructFieldType sftMBin = new StructFieldType("MBIN_HT", State.metadata.MBIN_HT.type());
+	    StructFieldType sftRInv = new StructFieldType("rInv", State.vector.RINV.type());
+	    StructFieldType sftPhi0 = new StructFieldType("phi0", State.vector.PHI0.type());
+	    StructFieldType sftZ0 = new StructFieldType("z0", State.vector.Z0.type());
+	    StructFieldType sftTan = new StructFieldType("t", State.vector.TANTHETA.type());
+	    StructFieldType sftC00 = new StructFieldType("C00", State.covariance.RINV.type());
+	    StructFieldType sftC11 = new StructFieldType("C11", State.covariance.PHI0.type());
+	    StructFieldType sftC22 = new StructFieldType("C22", State.covariance.TANTHETA.type());
+	    StructFieldType sftC33 = new StructFieldType("C33", State.covariance.Z0.type());
+	    StructFieldType sftC01 = new StructFieldType("C01", State.covariance.RINVPHI0.type());
+	    StructFieldType sftC23 = new StructFieldType("C23", State.covariance.TANLZ0.type());
+	    StructFieldType sftCS = new StructFieldType("chiSquared", State.covariance.CHISQUARED.type());
+	    StructFieldType sftValid = new StructFieldType("valid", dfeUInt(1));
+	    stData[0] = new DFEStructType(sftRInv, sftPhi0, sftTan, sftMBin, State.metadata.LAYERID.SFT(), State.metadata.NSKIPPEDLAYERS.SFT());
+	    stData[1] = new DFEStructType(sftZ0, sftC01, sftBlank(28));
+	    stData[2] = new DFEStructType(sftC22, sftC33, sftBlank(14));
+	    int nMetaDataValsInD3 = 0;
+	    for(State.metadata data : State.metadata.values()){
+	    	if( data.simLink() == 3 )
+	    		nMetaDataValsInD3++;
+	    }
+	    StructFieldType d3sfts[] = new StructFieldType[4 + nMetaDataValsInD3];
+	    d3sfts[0] = sftC23;
+	    d3sfts[1] = sftCS;
+	    d3sfts[2] = sftValid;
+	    int n = 0;
+	    for(State.metadata data : State.metadata.values()){
+	    	if(data.simLink() == 3){
+	    		d3sfts[3 + n] = new StructFieldType(data.name(), data.type());
+	    		n++;
+	    	}
+	    }
+        int nD3Bits = State.covariance.TANLZ0.type().getTotalBits() + State.covariance.CHISQUARED.type().getTotalBits() + 1; // + 1 for valid
+        for(int m = 0; m < State.metadata.values().length; m++){
+        	if(State.metadata.values()[m].simLink() == 3)
+        		nD3Bits += State.metadata.values()[m].type().getTotalBits();
+        }
+	    StructFieldType sftBlankD3 = new StructFieldType("blank", dfeUInt(64 - nD3Bits));
+	    d3sfts[4 + nMetaDataValsInD3 - 1] = sftBlank(64 - nD3Bits);
+        stData[3] = new DFEStructType(d3sfts);
+        stData[4] = new DFEStructType(sftC00, sftC11, sftBlank(64 - State.covariance.RINV.type().getTotalBits() - State.covariance.PHI0.type().getTotalBits()));
+        return stData[i];
+	}
+
+	private static StructFieldType sftBlank(int n){
+		return new StructFieldType("blank", dfeUInt(n));
+	}
+}

@@ -1,0 +1,270 @@
+package trackfit;
+
+import matrix.Vector;
+
+import com.maxeler.maxcompiler.v2.kernelcompiler.Kernel;
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelLib;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStruct;
+
+import formats.State;
+import formats.State.Cuts;
+import formats.State.MCBin;
+import formats.State.metadata;
+import formats.State.vector;
+
+public class KalmanState extends KernelLib{
+    private final Kernel kernel;
+	private final Vector x;
+	private final ConstrainedCovarianceMatrix pxx;
+    private final DFEStruct metadata;
+    private final DFEVar chiSquared;
+	private final DFEVar valid;
+	private final DFEStruct mcBin;
+	private final DFEStruct cuts;
+
+
+	public KalmanState(Vector x, ConstrainedCovarianceMatrix pxx, DFEVar valid, DFEStruct metadata, DFEStruct cuts, DFEVar chiSquared, DFEStruct mcBin){
+		super(x.getKernel());
+        this.kernel = x.getKernel();
+		this.x = x;
+		this.pxx = pxx;
+		this.valid = valid;
+		this.metadata = metadata;
+		this.chiSquared = chiSquared;
+		this.mcBin = mcBin;
+		this.cuts = cuts;
+	}
+
+	public KalmanState(Kernel owner){
+		super(owner);
+        this.kernel = owner;
+		this.x = new Vector(owner);
+		this.pxx = new ConstrainedCovarianceMatrix(owner);
+		this.valid = dfeUInt(1).newInstance(owner);
+		this.metadata = State.stMetadata().newInstance(owner);
+		this.chiSquared = State.covariance.CHISQUARED.type().newInstance(owner);
+		this.mcBin = State.stMCBin().newInstance(owner);
+		this.cuts = State.stCuts().newInstance(owner);
+	}
+
+	public KalmanState(DFEStruct data){
+		super(data.getKernel());
+		this.kernel = data.getKernel();
+		DFEVar x[] = new DFEVar[4];
+		x[0] = (DFEVar) data["rInv"];
+		x[1] = (DFEVar) data["phi0"];
+		x[2] = (DFEVar) data["t"];
+		x[3] = (DFEVar) data["z0"];
+		this.x = new Vector(x);
+		this.pxx = null;
+		this.valid = null;
+		this.metadata = null;
+		this.chiSquared = null;
+		this.mcBin = null;
+		this.cuts = null;
+	}
+
+    public void watch(String name){
+        this.x.toBits().watch(name+"_V");
+        this.pxx.toBits().watch(name+"_C");
+        this.valid.simWatch(name+"_valid");
+        this.chiSquared.simWatch(name+"_cs");
+        if((this.cuts != null) && (this.mcBin != null)){
+        	this.cuts.simWatch(name+"_cuts");
+        	this.mcBin.simWatch(name+"_mc");
+        }
+    }
+
+	/**
+	 * Constructor for an initial state seeded by a stub
+	 * @param owner Kernel which owns this KernelLib
+	 * @param inStub the KalmanStub input
+	 */
+	/*public KalmanState(Kernel owner, KalmanStub inStub){
+		super(owner);
+        this.kernel = owner;
+		this.xa = KF4.stXa().newInstance(owner);
+		xa["rInv"] <== owner.constant.var((DFEType) KF4.types()["rInv"], 0);
+		xa["phi0"] <== owner.constant.var((DFEType) KF4.types()["phi0"], 0);
+		xa["t"] <== owner.constant.var((DFEType) KF4.types()["t"], 0);
+		xa["z0"] <== owner.constant.var((DFEType) KF4.types()["z0"], 0);
+
+		this.pxxa = new ConstrainedCovarianceMatrix(owner);
+
+	}*/
+
+	/**
+	 * Get the state vector
+	 * @return the state vector
+	 */
+	public Vector x(){
+		return x;
+	}
+
+	public ConstrainedCovarianceMatrix pxx(){
+		return pxx;
+	}
+
+	public DFEVar valid(){
+		return valid;
+	}
+
+    public DFEStruct metadata(){
+    	return metadata;
+    }
+
+    public DFEVar metadata(String field){
+    	return metadata[field];
+    }
+
+    public DFEVar chiSquared(){
+    	return chiSquared;
+    }
+
+    public DFEVar ID(){
+    	return null;
+    }
+
+    public DFEStruct data(){
+		DFEStruct d = State.stState().newInstance(kernel);
+		d["rInv"] <== x.data(0).cast(State.vector.RINV.type());
+		d["phi0"] <== x.data(1).cast(State.vector.PHI0.type());
+		d["t"] <== x.data(2).cast(State.vector.TANTHETA.type());
+		d["z0"] <== x.data(3).cast(State.vector.Z0.type());
+		d["C00"] <== pxx.data(0, 0).cast(State.covariance.RINV.type());
+		d["C11"] <== pxx.data(1, 1).cast(State.covariance.PHI0.type());
+		d["C22"] <== pxx.data(2, 2).cast(State.covariance.TANTHETA.type());
+		d["C33"] <== pxx.data(3, 3).cast(State.covariance.Z0.type());
+		d["C01"] <== pxx.data(0, 1).cast(State.covariance.RINVPHI0.type());
+		d["C23"] <== pxx.data(2, 3).cast(State.covariance.TANLZ0.type());
+		d["chiSquared"] <== chiSquared.cast(State.covariance.CHISQUARED.type());
+		d["valid"] <== valid;
+		return d;
+    }
+
+
+	/**
+	 * Connect an uninitialised state to an existing one
+	 * @param state the existing state
+	 */
+	/*public void connect(KalmanState state){
+		this.xa.connect(state.xa());
+		this.pxxa.connect(state.pxxa());
+	}*/
+
+	/**
+	 * Output the kalman state
+	 * @param name the string for the output
+	 */
+	public void output(String name){
+		kernel.io.forceOutputsTogether(name+"_rInv", name+"_phi0", name+"_z0", name+"_t",
+				name+"_C00", name+"_C11", name+"_C22", name+"_C33", name+"_C01", name+"_C23", name+"_chiSquared", name+"_valid");
+		kernel.io.output(name+"_rInv", x.data(0).cast(State.vector.RINV.type()), State.vector.RINV.type());
+		kernel.io.output(name+"_phi0", x.data(1).cast(State.vector.PHI0.type()), State.vector.PHI0.type());
+		kernel.io.output(name+"_t", x.data(2).cast(State.vector.TANTHETA.type()), State.vector.TANTHETA.type());
+		kernel.io.output(name+"_z0", x.data(3).cast(State.vector.Z0.type()), State.vector.Z0.type());
+		kernel.io.output(name+"_C00", pxx.data(0, 0).cast(State.covariance.RINV.type()), State.covariance.RINV.type());
+		kernel.io.output(name+"_C11", pxx.data(1, 1).cast(State.covariance.PHI0.type()), State.covariance.PHI0.type());
+		kernel.io.output(name+"_C22", pxx.data(2, 2).cast(State.covariance.TANTHETA.type()), State.covariance.TANTHETA.type());
+		kernel.io.output(name+"_C33", pxx.data(3, 3).cast(State.covariance.Z0.type()), State.covariance.Z0.type());
+		kernel.io.output(name+"_C01", pxx.data(0, 1).cast(State.covariance.RINVPHI0.type()), State.covariance.RINVPHI0.type());
+		kernel.io.output(name+"_C23", pxx.data(2, 3).cast(State.covariance.TANLZ0.type()), State.covariance.TANLZ0.type());
+		kernel.io.output(name+"_chiSquared", chiSquared.cast(State.covariance.CHISQUARED.type()), State.covariance.CHISQUARED.type());
+		for(metadata data : State.metadata.values()){
+			kernel.io.output(name+"_"+data.name(), (DFEVar)metadata[data.name()], data.type());
+			kernel.io.forceOutputsTogether(name+"_valid", name+"_"+data.name());
+		}
+		for(Cuts data : State.Cuts.values()){
+			kernel.io.output(name+"_"+data.name(), (DFEVar)cuts[data.name()], data.type());
+			kernel.io.forceOutputsTogether(name+"_valid", name+"_"+data.name());
+		}
+		for(MCBin data : State.MCBin.values()){
+			kernel.io.output(name+"_"+data.name()+"_helix", (DFEVar)mcBin[data.name()], data.type());
+			kernel.io.forceOutputsTogether(name+"_valid", name+"_"+data.name()+"_helix");
+		}
+		kernel.io.output(name+"_valid", valid, dfeUInt(1));
+	}
+
+	public void wideOutput(String name){
+		DFEStruct d = State.stState().newInstance(kernel);
+		d["rInv"] <== x.data(0).cast(State.vector.RINV.type());
+		d["phi0"] <== x.data(1).cast(State.vector.PHI0.type());
+		d["t"] <== x.data(2).cast(State.vector.TANTHETA.type());
+		d["z0"] <== x.data(3).cast(State.vector.Z0.type());
+		d["C00"] <== pxx.data(0, 0).cast(State.covariance.RINV.type());
+		d["C11"] <== pxx.data(1, 1).cast(State.covariance.PHI0.type());
+		d["C22"] <== pxx.data(2, 2).cast(State.covariance.TANTHETA.type());
+		d["C33"] <== pxx.data(3, 3).cast(State.covariance.Z0.type());
+		d["C01"] <== pxx.data(0, 1).cast(State.covariance.RINVPHI0.type());
+		d["C23"] <== pxx.data(2, 3).cast(State.covariance.TANLZ0.type());
+		d["chiSquared"] <== chiSquared.cast(State.covariance.CHISQUARED.type());
+		d["valid"] <== valid;
+		kernel.io.output(name, d, State.stState());
+		kernel.io.output(name+"_metadata", this.metadata(), State.stMetadata());
+	}
+
+	public static KalmanState input(Kernel kernel, String name){
+		kernel.io.forceInputsTogether(name+"_rInv", name+"_phi0", name+"_z0", name+"_t",
+				name+"_C00", name+"_C11", name+"_C22", name+"_C33", name+"_C01", name+"_C23", name+"_chiSquared", name+"_valid");
+		DFEVar rInv = kernel.io.input(name+"_rInv", vector.RINV.type());
+		DFEVar phi0 = kernel.io.input(name+"_phi0", State.vector.PHI0.type());
+		DFEVar z0 = kernel.io.input(name+"_z0", State.vector.Z0.type());
+		DFEVar t = kernel.io.input(name+"_t", State.vector.TANTHETA.type());
+		DFEVar zero_zero = kernel.io.input(name+"_C00", State.covariance.RINV.type());
+		DFEVar one_one = kernel.io.input(name+"_C11", State.covariance.PHI0.type());
+		DFEVar two_two = kernel.io.input(name+"_C22", State.covariance.TANTHETA.type());
+		DFEVar three_three = kernel.io.input(name+"_C33", State.covariance.Z0.type());
+		DFEVar zero_one = kernel.io.input(name+"_C01", State.covariance.RINVPHI0.type());
+		DFEVar two_three = kernel.io.input(name+"_C23", State.covariance.TANLZ0.type());
+		DFEVar chiSquared = kernel.io.input(name+"_chiSquared", State.covariance.CHISQUARED.type());
+		DFEVar valid = kernel.io.input(name+"_valid", dfeUInt(1));
+		DFEStruct metaData = State.stMetadata().newInstance(kernel);
+		for(metadata data : State.metadata.values()){
+			metaData[data.name()] <== kernel.io.input(name+"_"+data.name(), data.type());
+			kernel.io.forceInputsTogether(name+"_valid", name+"_"+data.name());
+		}
+
+		Vector v = new Vector(new DFEVar[]{rInv, phi0, t, z0});
+		ConstrainedCovarianceMatrix m = new ConstrainedCovarianceMatrix(new DFEVar[]{zero_zero, one_one, two_two, three_three, zero_one, two_three}, 4);
+		return new KalmanState(v, m, valid, metaData, null, chiSquared, null);
+	}
+
+	public static KalmanState wideInput(Kernel kernel, String name){
+		DFEStruct d = kernel.io.input(name, State.stState());
+		Vector v = new Vector(new DFEVar[]{d["rInv"], d["phi0"], d["t"], d["z0"]});
+		ConstrainedCovarianceMatrix m = new ConstrainedCovarianceMatrix(new DFEVar[]{d["C00"], d["C11"], d["C22"], d["C33"], d["C01"], d["C23"]}, 4);
+		DFEVar cs = d["chiSquared"];
+		DFEStruct metadata = kernel.io.input(name+"_metadata", State.stMetadata());
+		return new KalmanState(v, m, (DFEVar) d["valid"], metadata, null, cs, null);
+	}
+
+/**
+ * Multiplex an array of KalmanState, returning a single state
+ * Breaks the KalmanState into its constituent DFE objects and multiples them
+ * @param select The array index which gets selected
+ * @param options The array of options
+ * @return The selected state
+ */
+/*	public static KalmanState mux(DFEVar select, KalmanState[] options){
+		Kernel kernel = select.getKernel();
+		Vector[] vs = new Vector[options.length];
+		ConstrainedCovarianceMatrix[] ms = new ConstrainedCovarianceMatrix[options.length];
+		Vector v = (Vector) Vector.mux(select, vs);
+		ConstrainedCovarianceMatrix m = ConstrainedCovarianceMatrix.mux(select, ms);
+		DFEVar
+		return new KalmanState(v, m);
+	}*/
+
+/**
+ * Stream offset of a KalmanState.
+ * @param offset the integer offset into the stream
+ * @return The KalmanState at an offset point in the stream
+ */
+    /*public KalmanState offset(int offset){
+    	Vector v = this.x().offset(offset);
+    	ConstrainedCovarianceMatrix m = this.pxx().offset(offset);
+        return new KalmanState(this.kernel, v, m);
+    }*/
+
+}

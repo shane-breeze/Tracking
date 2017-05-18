@@ -1,0 +1,131 @@
+package trackfit;
+
+import com.maxeler.maxcompiler.v2.build.EngineParameters;
+import com.maxeler.maxcompiler.v2.kernelcompiler.Kernel;
+import com.maxeler.maxcompiler.v2.managers.StandaloneKernelHWManager;
+import com.maxeler.maxcompiler.v2.managers.StandaloneKernelHWManager.GenerationMode;
+import com.maxeler.maxcompiler.v2.managers.StandaloneKernelHWManager.TargetDevice;
+import com.maxeler.maxcompiler.v2.managers.custom.CustomManager;
+import com.maxeler.maxcompiler.v2.managers.custom.DFELink;
+import com.maxeler.maxcompiler.v2.managers.custom.blocks.KernelBlock;
+import com.maxeler.maxcompiler.v2.managers.engine_interfaces.CPUTypes;
+import com.maxeler.maxcompiler.v2.managers.engine_interfaces.EngineInterface;
+import com.maxeler.maxcompiler.v2.managers.engine_interfaces.InterfaceParam;
+
+public class trackfitManager extends CustomManager{
+
+	private static final String kernelName = "kfWorker";
+
+	public static void main(String[] args) {
+		String SimBuild = System.getenv("SimBuild");
+		String synthesis;
+		if(SimBuild.equals("true")){
+			boolean trunc = System.getenv("truncation").equals("true");
+			String truncString = trunc ? " with " : " without ";
+			System.out.println("Building sim" + truncString + "truncation.");
+			makeSim(args, trunc);
+		}else{
+			synthesis = System.getenv("Synthesis");
+			GenerationMode gm;
+			if(synthesis.equals("true")){
+				gm = GenerationMode.HARDWARE_NETLIST;
+			}else{
+				gm = GenerationMode.MODELSIM_HDL;
+			}
+			System.out.println("Building VHDL");
+			makeHDL(gm);
+		}
+
+	}
+
+	public trackfitManager(EngineParameters engineParams, boolean trunc) {
+		super(engineParams);
+		this.getCurrentKernelConfig().debug.setEnableLatencyAnnotation(true);
+		KernelBlock SimInput = addKernel(new SimInput(makeKernelParameters("SimInput")));
+		KernelBlock KFKernel;
+		if(trunc){
+			KFKernel = addKernel(new TrackFitKernel(makeKernelParameters("KalmanFilterWorker"), true));
+		}else{
+			KFKernel = addKernel(new TrackFitKernel(makeKernelParameters("KalmanFilterWorker"), true));
+		}
+		KernelBlock SimOutput = addKernel(new SimOutput(makeKernelParameters("SimOutput")));
+
+		DFELink stubIn = addStreamFromCPU("stubIn");
+		//DFELink stateIn = addStreamFromCPU("stateIn");
+		DFELink d0o = addStreamToCPU("d0o");
+		DFELink d1o = addStreamToCPU("d1o");
+		DFELink d2o = addStreamToCPU("d2o");
+		DFELink d3o = addStreamToCPU("d3o");
+		DFELink d4o = addStreamToCPU("d4o");
+        DFELink d0 = addStreamFromCPU("d0");
+        DFELink d1 = addStreamFromCPU("d1");
+        DFELink d2 = addStreamFromCPU("d2");
+        DFELink d3 = addStreamFromCPU("d3");
+        DFELink d4 = addStreamFromCPU("d4");
+
+		//SimInput.getInput("stateIn") <== stateIn;
+		SimInput.getInput("d0") <== d0;
+		SimInput.getInput("d1") <== d1;
+		SimInput.getInput("d2") <== d2;
+		SimInput.getInput("d3") <== d3;
+		SimInput.getInput("d4") <== d4;
+		SimInput.getInput("stubIn") <== stubIn;
+		KFKernel.getInput("stubIn") <== SimInput.getOutput("stubOut");
+		KFKernel.getInput("stateIn") <== SimInput.getOutput("stateOut");
+		KFKernel.getInput("stateIn_metadata") <== SimInput.getOutput("metadata");
+		SimOutput.getInput("stateIn") <== KFKernel.getOutput("stateOut");
+		SimOutput.getInput("metaDataIn") <== KFKernel.getOutput("stateOut_metadata");
+		d0o <== SimOutput.getOutput("d0");
+		d1o <== SimOutput.getOutput("d1");
+		d2o <== SimOutput.getOutput("d2");
+		d3o <== SimOutput.getOutput("d3");
+		d4o <== SimOutput.getOutput("d4");
+	}
+
+	private static void makeHDL(GenerationMode gMode){
+		StandaloneKernelHWManager manager   = new StandaloneKernelHWManager(
+			kernelName,
+			TargetDevice.VIRTEX6_SX475T,
+			gMode);
+		manager.getCurrentKernelConfig().optimization.setTriAddsEnabled(false);
+		manager.getCurrentKernelConfig().debug.setEnableLatencyAnnotation(true);
+		manager.getCurrentKernelConfig().debug.setEnableLongestPathAnnotation("stateIn_C00", "stateOut_C00");
+		Kernel kernel = new TrackFitKernel(manager.makeKernelParameters(), false);
+		kernel.io.pushInputRegistering(false);
+		kernel.flush.disabled();
+		manager.setKernel(kernel);
+		manager.build();
+	}
+
+	private static void makeSim(String[] args, boolean trunc){
+    	EngineParameters engineParameters = new EngineParameters(args);
+    	trackfitManager manager = new trackfitManager(engineParameters, trunc);
+    	manager.setParameter("useNewClockWidthAssignment", "true");
+    	manager.setParameter("manager.use_new_clock_width_assignment", "true");
+    	manager.createSLiCinterface(interfaceDefault());
+    	manager.config.setAllowNonMultipleTransitions(true);
+    	manager.build();
+	}
+
+    private static EngineInterface interfaceDefault(){
+        EngineInterface ei = new EngineInterface();
+        InterfaceParam nStubs = ei.addParam("dataSize",CPUTypes.INT32); // Number of stubs
+        ei.setTicks("KalmanFilterWorker", nStubs);
+        ei.setTicks("SimInput", nStubs);
+        ei.setTicks("SimOutput", nStubs);
+        //ei.setStream("stateIn", CPUTypes.UINT64, 24 * nStubs);
+        ei.setStream("d0", CPUTypes.UINT64, 8 * nStubs);
+        ei.setStream("d1", CPUTypes.UINT64, 8 * nStubs);
+        ei.setStream("d2", CPUTypes.UINT64, 8 * nStubs);
+        ei.setStream("d3", CPUTypes.UINT64, 8 * nStubs);
+        ei.setStream("d4", CPUTypes.UINT64, 8 * nStubs);
+        ei.setStream("stubIn", CPUTypes.UINT64, 8 * nStubs);
+        ei.setStream("d0o", CPUTypes.UINT64, 8 * nStubs);
+        ei.setStream("d1o", CPUTypes.UINT64, 8 * nStubs);
+        ei.setStream("d2o", CPUTypes.UINT64, 8 * nStubs);
+        ei.setStream("d3o", CPUTypes.UINT64, 8 * nStubs);
+        ei.setStream("d4o", CPUTypes.UINT64, 8 * nStubs);
+        return ei;
+    }
+
+}

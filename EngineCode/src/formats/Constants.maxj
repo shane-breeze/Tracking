@@ -1,0 +1,170 @@
+package formats;
+
+import matrix.Matrix;
+
+import com.maxeler.maxcompiler.v2.kernelcompiler.Kernel;
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelLib;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
+
+public class Constants extends KernelLib{
+
+    private final static int phiSectors = 16;
+    private final static double phiSectorWidth = 2 * Math.PI / phiSectors;
+    private final static int nCBits = 6;
+    private final static int cBins = (int) Math.pow(2, nCBits);
+    private final static int nMBits = 5;
+    private final static int mBins = (int) Math.pow(2, nMBits);
+    private final static double minPt = 3; // GeV
+    private final static double cBinBase = 2.0 * Math.PI / phiSectors / cBins;
+    private final static double mBinBase = 2.0 * 0.00057168 / minPt / mBins;
+    private final static double rOfPhi = 580;
+    private final static double rMult = 0.9938;
+    private final static double phiMult = 20860.75;
+    private final double phi0Base = cBinBase * Math.pow(2, -7);
+    private final static double rInvBase = 1;// * Math.pow(2, -17);
+    private final static double zBase = 1 / 0.64;
+    private final static int beamSpot = 150;
+    private final static double residualCut = 70;
+    private final static double chiSquaredCut = 50;
+    private final static double bField = 3.8112;
+    private final static double speedOfLight = 299792458;
+    private final static double ptCut = 2.9; // [GeV] Value to cut the 1/2R in the state
+    private final static double chiSqMax = 1023;
+    private final static double chiSqCuts[] = {1023, 1023, 15, 100, 320, 1023, 1023, 1023}; // Chi squared cut values
+
+    private final static double barrelRBoundaries[] = {100, 300, 450, 600, 800, 1000, 1200}; // radii in between barrel layers
+    private final static double endcapZBoundaries[] = {1200, 1450, 1750, 2050, 2450, 3000}; // z values in between endcap disks
+    private final static double rOfZ = 500;
+    private final static double[] etaSecBounds = new double[]{-2.4, -2.16, -1.95, -1.7, -1.43, -1.16, -0.89, -0.61, -0.31, 0.0, 0.31, 0.61, 0.89, 1.16, 1.43, 1.7, 1.95, 2.16, 2.4};
+
+    private final static int nHWRInvFracBits = 11; // TODO If State rInv type changes, this must change
+	public Constants(Kernel owner){
+		super(owner);
+	}
+
+	public static double zBase(){ return zBase; }
+	public static double rInvBase(){ return rInvBase; }
+	public static double rMult(){ return rMult; }
+	public static double phiMult(){ return phiMult; }
+	public static double rOfPhi(){ return rOfPhi; }
+	public static double rOfZ(){ return rOfZ; }
+	public static double beamSpot(){ return beamSpot * rMult; }
+	public static double residualCut(){ return residualCut; }
+	public static double chiSquaredCut(){ return chiSquaredCut; }
+	public static double ptCut(){ return ptCut; }
+	public static double[] barrelRBoundaries(){ return barrelRBoundaries; }
+	public static double[] endcapZBoundaries(){ return endcapZBoundaries; }
+	public static int nHWRInvFracBits(){ return nHWRInvFracBits; }
+
+	public static Matrix Identity(Kernel owner, int n){
+		DFEVar[][] mat = new DFEVar[n][n];
+		for(int i = 0; i < n; i++){
+			for(int j = 0; j < n; j++){
+				if(i == j){
+					mat[i][j] = owner.constant.var(1);
+				}else{
+					mat[i][j] = owner.constant.var(0);
+				}
+			}
+		}
+		return new Matrix(mat);
+	}
+
+	public static DFEVar[] chiSquaredCuts(Kernel k){
+		DFEVar cuts[] = new DFEVar[chiSqCuts.length];
+		for(int i = 0; i < chiSqCuts.length; i++)
+			cuts[i] = k.constant.var(dfeUInt(10), chiSqCuts[i]);
+		return cuts;
+	}
+	public static double tanL(double eta){
+		return 1. / Math.tan(2 * Math.atan(Math.exp(-eta)));
+	}
+
+	public static double sectorZ50L(int i){
+		double z50 = tanL(etaSecBounds[i]) * rOfZ;// - beamSpot;
+		return z50;
+	}
+
+	public static double sectorZ50H(int i){
+		double z50 = tanL(etaSecBounds[i+1]) * rOfZ;// + beamSpot;
+		return z50;
+	}
+
+
+	/**
+	 * Return theta in radians from theta in HWU
+	 * @param theta in HWU
+	 * @return theta in radians
+	 */
+	public static double HWUToRad(double theta){
+		return theta / phiMult;
+	}
+
+	public static double radToHWU(double theta){
+		return theta * phiMult;
+	}
+
+	/**
+	 * Return C for a given phi58
+	 * @param phi58 The track angle at r=580mm in radians
+	 * @return C (as a double)
+	 */
+	public static double phi58ToC(double phi58){
+		double dcbin = Math.pow(2, nCBits) / (phiSectorWidth);
+		return phi58 * dcbin;
+	}
+
+	public static DFEVar phi58ToC(DFEVar phi58){
+		double hwuToRad = 1./phiMult;
+		double dcbin = Math.pow(2, nCBits) / (phiSectorWidth);
+		return phi58 * (dcbin * hwuToRad);
+	}
+
+	/**
+	 *
+	 * @param pt: Transverse momentum in GeV
+	 * @return Inverse radius of curvature in [1/mm]
+	 */
+	public static double ptToInv2R(double pt){
+		return (bField * speedOfLight) / (1e12 * 2 * pt);
+	}
+
+	public static double inv2RToHWU(double inv2R){
+		return inv2R * phiMult / rMult;
+	}
+
+	public static double HWUToInv2R(double hwu){
+		return hwu * rMult / phiMult / Math.pow(2, nHWRInvFracBits);
+	}
+
+	public static double inv2RToM(double inv2R){
+		double dmbin = Math.pow(2, nMBits) / (2 * ptToInv2R(minPt));
+		return inv2R * dmbin;
+	}
+
+	public static DFEVar mToInv2R(DFEVar m){
+		double invdmbin = 1./((Math.pow(2, nMBits) / (2 * ptToInv2R(minPt))));
+		return m * invdmbin;
+	}
+
+	public static double mToInv2R(double m){
+		double dmbin = Math.pow(2, nMBits) / (2 * ptToInv2R(minPt));
+		return m / dmbin;
+	}
+
+	public static DFEVar inv2RToM(DFEVar inv2R){
+		double hwuToInv2R = rMult / phiMult;
+		double dmbin = Math.pow(2, nMBits) / (2 * ptToInv2R(minPt));
+		return inv2R * (dmbin * hwuToInv2R);
+	}
+
+	public static double rHWUToMm(double r){
+		return r / rMult;
+	}
+
+	public static double rMmToHWU(double r){
+		return r * rMult;
+	}
+
+
+}

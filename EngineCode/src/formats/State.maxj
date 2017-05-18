@@ -1,0 +1,187 @@
+package formats;
+
+import matrix.FOM;
+
+import com.maxeler.maxcompiler.v2.kernelcompiler.Kernel;
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelLib;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEFix.SignMode;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStructType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStructType.StructFieldType;
+
+public class State extends KernelLib{
+
+	public State(Kernel owner){
+		super(owner);
+	}
+
+	public static enum vector {
+		RINV (dfeFixMax(18, 51, SignMode.TWOSCOMPLEMENT), new FOM(51, 18, true)),  //(dfeInt(18)), //(dfeFix(0, 18, SignMode.TWOSCOMPLEMENT)),
+		PHI0 (dfeFixMax(18, 8191, SignMode.TWOSCOMPLEMENT), new FOM(8191, 18, true)),//(dfeInt(18)), //(dfeFix(0, 18, SignMode.TWOSCOMPLEMENT)),
+		TANTHETA (dfeFixMax(18, 12, SignMode.TWOSCOMPLEMENT), new FOM(12, 18, true)),//(dfeInt(18)), //(dfeFix(9, 9, SignMode.TWOSCOMPLEMENT)),
+		Z0 (dfeFixMax(18, 150, SignMode.TWOSCOMPLEMENT), new FOM(150, 18, true));//(dfeInt(18)); //(dfeFix(9, 9, SignMode.TWOSCOMPLEMENT));
+
+		private final DFEType type;
+		private final FOM fom;
+
+		private vector(DFEType type, FOM fom){
+			this.type = type;
+			this.fom = fom;
+		}
+		public DFEType type(){ return this.type; }
+		public FOM fom(){ return this.fom; }
+
+	}
+
+	public enum covariance {
+		RINV (dfeFix(-1, 26, SignMode.TWOSCOMPLEMENT)),
+		PHI0 (dfeFix(17, 8, SignMode.TWOSCOMPLEMENT)),
+		TANTHETA (dfeFix(-2, 27, SignMode.TWOSCOMPLEMENT)),
+		Z0 (dfeFix(13, 12, SignMode.TWOSCOMPLEMENT)),
+		RINVPHI0 (dfeFix(8, 10, SignMode.TWOSCOMPLEMENT)),
+		TANLZ0 (dfeFix(6, 12, SignMode.TWOSCOMPLEMENT)),
+		CHISQUARED (dfeFixMax(17, 1023, SignMode.UNSIGNED));
+
+		private final DFEType type;
+		private covariance(DFEType type){
+			this.type = type;
+		}
+		public DFEType type(){ return this.type; }
+	}
+
+    public enum metadata{
+    	MBIN_HT (dfeInt(5), 0),
+    	CBIN_HT (dfeInt(6), 3),
+        LAYERID (dfeUInt(3), 0),
+        SECTORID (dfeUInt(4), 3),
+        CANDIDATEID (dfeUInt(6), 3),
+        NSKIPPEDLAYERS (dfeUInt(2), 0),
+        ZSIGN (dfeUInt(1), 3),
+        EVENTID (dfeUInt(4), 3);
+
+        private final DFEType type;
+        private final int link;
+        private metadata(DFEType type, int link){
+            this.type = type;
+            this.link = link;
+        }
+        public DFEType type(){
+            return this.type;
+        }
+        public int simLink(){
+        	return this.link;
+        }
+        public StructFieldType SFT(){
+        	return new StructFieldType(this.name(), this.type());
+        }
+    }
+
+    public enum Cuts{
+    	pTCut (dfeUInt(1)),
+    	z0Cut (dfeUInt(1)),
+    	mBinInRange(dfeUInt(1)),
+    	sufficientPS(dfeUInt(1)),
+    	SectorCut(dfeUInt(1)),
+    	ChiSquaredCut (dfeUInt(1));
+
+    	private final DFEType type;
+    	private Cuts(DFEType type){
+    		this.type = type;
+    	}
+    	public DFEType type(){ return this.type; }
+    	public StructFieldType SFT(){ return new StructFieldType(this.name(), this.type()); }
+    }
+
+    public enum MCBin{
+
+    	MBIN (State.metadata.MBIN_HT.type()),
+    	CBIN (State.metadata.CBIN_HT.type()),
+    	MCCOMPATIBLE (dfeUInt(1));
+
+    	private final DFEType type;
+    	private MCBin(DFEType type){
+    		this.type = type;
+    	}
+    	public DFEType type(){ return this.type; }
+    	public StructFieldType SFT(){ return new StructFieldType(this.name(), this.type()); }
+    }
+
+	private final static StructFieldType sftRInv = new StructFieldType("rInv", vector.RINV.type());
+	private final static StructFieldType sftPhi0 = new StructFieldType("phi0", vector.PHI0.type());
+	private final static StructFieldType sftTanTheta = new StructFieldType("t", vector.TANTHETA.type());
+	private final static StructFieldType sftZ0 = new StructFieldType("z0", vector.Z0.type());
+	private final static StructFieldType sftC00 = new StructFieldType("C00", covariance.RINV.type());
+	private final static StructFieldType sftC11 = new StructFieldType("C11", covariance.PHI0.type());
+	private final static StructFieldType sftC22 = new StructFieldType("C22", covariance.TANTHETA.type());
+	private final static StructFieldType sftC33 = new StructFieldType("C33", covariance.Z0.type());
+	private final static StructFieldType sftC01 = new StructFieldType("C01", covariance.RINVPHI0.type());
+	private final static StructFieldType sftC23 = new StructFieldType("C23", covariance.TANLZ0.type());
+	private final static StructFieldType sftCS = new StructFieldType("chiSquared", covariance.CHISQUARED.type());
+	private final static StructFieldType sftValid = new StructFieldType("valid", dfeUInt(1));
+	private final static DFEStructType stState = new DFEStructType(sftRInv, sftPhi0, sftTanTheta, sftZ0, sftC00, sftC11, sftC22, sftC33, sftC01, sftC23, sftCS, sftValid);
+
+	public static DFEStructType stState(){
+		return stState;
+	}
+
+	public static DFEStructType stMetadata(){
+		int i =0;
+		StructFieldType[] fields = new StructFieldType[metadata.values().length];
+		for(metadata data : metadata.values()){
+			fields[i] = new StructFieldType(data.name(), data.type());
+			i += 1;
+		}
+		return new DFEStructType(fields);
+	}
+
+	public static DFEStructType stCuts(){
+		int i = 0;
+		StructFieldType[] fields = new StructFieldType[Cuts.values().length];
+		for(Cuts cut : Cuts.values()){
+			fields[i++] = cut.SFT();
+		}
+		return new DFEStructType(fields);
+	}
+
+	public static DFEStructType stMCBin(){
+		int i = 0;
+		StructFieldType[] fields = new StructFieldType[MCBin.values().length];
+		for(MCBin field : MCBin.values()){
+			fields[i++] = field.SFT();
+		}
+		return new DFEStructType(fields);
+	}
+
+
+	public static DFEStructType stStateAll(){
+		int i = 0;
+		StructFieldType[] fields = new StructFieldType[vector.values().length + covariance.values().length + metadata.values().length];
+		for(vector data : vector.values()){
+			fields[i] = new StructFieldType(data.name(), data.type());
+			i++;
+		}
+		for(covariance data : covariance.values()){
+			fields[i] = new StructFieldType(data.name(), data.type());
+			i++;
+		}
+		for(metadata data : metadata.values()){
+			fields[i] = new StructFieldType(data.name(), data.type());
+			i++;
+		}
+		return new DFEStructType(fields);
+	}
+
+	public static FOM[][] PxxFOM(){
+		FOM[][] fom = new FOM[4][4];
+		fom[0][0] = new FOM(covariance.RINV.type());//FOM(25, -26, MathOps.ALL);
+		fom[1][1] = new FOM(covariance.PHI0.type());//25, -8, MathOps.ALL);
+		fom[2][2] = new FOM(covariance.TANTHETA.type());//25, -27, MathOps.ALL);
+		fom[3][3] = new FOM(covariance.Z0.type());//25, -12, MathOps.ALL);
+		fom[0][1] = new FOM(covariance.RINVPHI0.type());
+		fom[1][0] = new FOM(covariance.RINVPHI0.type());
+		fom[2][3] = new FOM(covariance.TANLZ0.type());
+		fom[3][2] = new FOM(covariance.TANLZ0.type());
+		return fom;
+	}
+
+}

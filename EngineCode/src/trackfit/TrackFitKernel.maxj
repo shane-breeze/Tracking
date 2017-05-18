@@ -1,0 +1,44 @@
+package trackfit;
+
+import com.maxeler.maxcompiler.v2.kernelcompiler.Kernel;
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelParameters;
+
+public class TrackFitKernel extends Kernel{
+
+	private final boolean doWatches = true;
+
+	protected TrackFitKernel(KernelParameters parameters, boolean simulation) {
+		super(parameters);
+		//optimization.pushRoundingMode(RoundingMode.TONEAR);
+		KalmanStub.setDSPPipelineFactor(0.5);
+		KalmanStub stubIn;
+		KalmanState kStateIn;
+		// Input a stub and state (either for sim or hardware)
+		if(simulation){
+			stubIn = KalmanStub.wideInput(this, "stubIn");
+			kStateIn = KalmanState.wideInput(this, "stateIn");
+			if(doWatches){
+				kStateIn.watch("stateIn");
+				stubIn.watch("stubIn");
+			}
+            debug.pushEnableNumericExceptions(true);
+		}else{
+			stubIn = KalmanStub.input(this, "stubIn");
+			kStateIn = KalmanState.input(this, "stateIn");
+			io.forceInputsTogether("stubIn_valid", "stateIn_valid");
+		}
+		// Update a state
+		KF4 kfWorker = new KF4(this, kStateIn, stubIn, simulation);
+		KalmanState stateUpdated = kfWorker.update();
+
+		// Output the update
+		if(simulation){
+			stateUpdated.wideOutput("stateOut");
+			if(doWatches)
+				stateUpdated.watch("stateOut");
+		}else{
+			stateUpdated.output("stateOut");
+		}
+	}
+
+}

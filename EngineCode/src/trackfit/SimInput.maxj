@@ -1,0 +1,66 @@
+package trackfit;
+
+import com.maxeler.maxcompiler.v2.kernelcompiler.Kernel;
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelParameters;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStruct;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStructType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStructType.StructFieldType;
+
+import formats.State;
+import formats.Stub;
+
+public class SimInput extends Kernel{
+
+	protected SimInput(KernelParameters parameters){
+		super(parameters);
+		// Input, format, and output stub
+		int nStubDataBits = Stub.stStub().getTotalBits();
+		int nStubBlankBits = (int) Math.ceil((float) nStubDataBits / 32) * 32 - nStubDataBits;
+		StructFieldType sftStubData = new StructFieldType("data", dfeRawBits(nStubDataBits));
+		StructFieldType sftStubBlank = new StructFieldType("blank", dfeRawBits(nStubBlankBits)); // To make a multiplie of 64 for PCIE
+		DFEStructType stStubIn = new DFEStructType(sftStubData, sftStubBlank);
+		DFEStructType stStubOut = new DFEStructType(sftStubData);
+		DFEStruct iStub = io.input("stubIn", stStubIn);
+		DFEStruct oStub = stStubOut.newInstance(this);
+		oStub["data"] <== iStub["data"];
+		io.output("stubOut", oStub, stStubOut);
+		//iStub.simWatch("stubIn");
+
+		// Input, format, and output state
+		DFEStruct[] di = new DFEStruct[5];
+        di[0] = io.input("d0", SimIO.stData(0));
+        di[1] = io.input("d1", SimIO.stData(1));
+        di[2] = io.input("d2", SimIO.stData(2));
+        di[3] = io.input("d3", SimIO.stData(3));
+        di[4] = io.input("d4", SimIO.stData(4));
+        DFEStruct oState = State.stState().newInstance(this);
+        oState["rInv"] <== d(di[0], "rInv");
+        oState["phi0"] <== d(di[0], "phi0");
+        oState["t"] <== d(di[0], "t");
+        oState["z0"] <== d(di[1], "z0");
+        oState["C00"] <== d(di[4], "C00");
+        oState["C11"] <== d(di[4], "C11");
+        oState["C22"] <== d(di[2], "C22");
+        oState["C33"] <== d(di[2], "C33");
+        oState["C01"] <== d(di[1], "C01");
+        oState["C23"] <== d(di[3], "C23");
+        oState["chiSquared"] <== d(di[3], "chiSquared");
+        oState["valid"] <== d(di[3], "valid");
+        io.output("stateOut", oState, State.stState());
+
+        DFEStruct metadata = State.stMetadata().newInstance(this);
+        for(State.metadata data : State.metadata.values()){
+        	metadata[data.name()] <== d(di[data.simLink()], data.name());
+        }
+        io.output("metadata", metadata, State.stMetadata());
+
+        //DFEVar stubSimID = (d(di[1], "blank") # d(di[2], "blank")).cast(dfeUInt(20));
+        //stubSimID.simWatch("nIteration");
+        //metadata.simWatch("metaData");
+
+	}
+
+	private DFEVar d(DFEStruct struct, String field){ return struct[field]; } // Just to do the casting
+
+}

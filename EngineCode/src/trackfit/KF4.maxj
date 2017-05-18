@@ -1,0 +1,422 @@
+package trackfit;
+
+import java.util.HashMap;
+import java.util.Map;
+
+import matrix.Matrix;
+import matrix.Vector;
+
+import com.maxeler.maxcompiler.v2.kernelcompiler.Kernel;
+import com.maxeler.maxcompiler.v2.kernelcompiler.Optimization;
+import com.maxeler.maxcompiler.v2.kernelcompiler.op_management.MathOps;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.KernelType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEFix.SignMode;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStruct;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStructType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStructType.StructFieldType;
+
+import division.Divider;
+import formats.State;
+
+public class KF4 extends KFWorker{
+
+	private DFEVar rC01;
+	private DFEVar rC23;
+	private final static KernelType<DFEVar> tRInv = State.vector.RINV.type();
+	private final static KernelType<DFEVar> tPhi0 = State.vector.PHI0.type();
+	private final static KernelType<DFEVar> tTanTheta = State.vector.TANTHETA.type();
+	private final static KernelType<DFEVar> tZ0 = dfeFix(6, 6, SignMode.TWOSCOMPLEMENT);
+	private final static StructFieldType sftRInv = new StructFieldType("rInv", tRInv );
+	private final static StructFieldType sftPhi0 = new StructFieldType("phi0", dfeFix(6, 6, SignMode.TWOSCOMPLEMENT));
+	private final static StructFieldType sftTanTheta = new StructFieldType("t", dfeFix(6, 6, SignMode.TWOSCOMPLEMENT));
+	private final static StructFieldType sftZ0 = new StructFieldType("z0", dfeFix(6, 6, SignMode.TWOSCOMPLEMENT));
+	private final static DFEStructType stXa = new DFEStructType(sftRInv, sftPhi0, sftTanTheta, sftZ0);
+
+	// Types for the Pdd and Pdd inverse matrices
+	private final static int nPdd00IntBits = 17;
+	private final static int nPdd00FracBits = 7;
+	private final static int nPdd00InvIntBits = 3;
+	private final static int nPdd00InvFracBits = 32;
+	private final static DFEType tPdd00Inv = dfeFix(nPdd00InvIntBits, nPdd00InvFracBits, SignMode.TWOSCOMPLEMENT);
+
+	private final static int nPdd11IntBits = 16;
+	private final static int nPdd11FracBits = 8;
+	private final static DFEType tPdd11 = dfeFix(nPdd11IntBits, nPdd11FracBits, SignMode.TWOSCOMPLEMENT);
+	private final static int nPdd11InvIntBits = 4;
+	private final static int nPdd11InvFracBits = 31;
+	private final static DFEType tPdd11Inv = dfeFix(nPdd11InvIntBits, nPdd11InvFracBits, SignMode.TWOSCOMPLEMENT);
+
+	private final double DSPPipelineFactor = 0.8;
+
+	//private final static double Pdd00Max = Math.pow(2, 13);
+
+	public KF4(Kernel owner, KalmanState kalmanState, KalmanStub hit, boolean simulation) {
+		super(owner, kalmanState, hit, simulation);
+	}
+
+	@Override
+	public DFEStruct convert(Vector state) {
+		DFEStruct xa = stXa.newInstance(getKernel());
+		xa["rInv"] <== state.data(0);
+		xa["phi0"] <== state.data(1);
+		xa["t"] <== state.data(2);
+		xa["z0"] <== state.data(3);
+		return xa;
+	}
+
+	@Override
+	public Vector convert(DFEStruct state) {
+		DFEVar[] xa = new DFEVar[4];
+		xa[0] = (DFEVar) state["rInv"];
+		xa[1] = (DFEVar) state["phi0"];
+		xa[2] = (DFEVar) state["t"];
+		xa[3] = (DFEVar) state["z0"];
+		return new Vector(xa);
+	}
+
+	//@Override
+	/**
+	 * Convert a state vector into the labelled DFEStruct and truncate
+	 */
+	/*public DFEStruct convertTruncate(Vector state){
+		DFEStruct xa = stXa.newInstance(getKernel());
+		xa["rInv"] <== state.data(0).cast((DFEType) tRInv);
+		xa["phi0"] <== state.data(1).cast((DFEType) tPhi0);
+		xa["t"] <== state.data(2).cast((DFEType) tTanTheta);
+		xa["z0"] <== state.data(3).cast((DFEType) tZ0);
+		return xa;
+	}*/
+
+	/*@Override
+	public DFEVar[][] truncatePxx(DFEVar[][] pxx){
+		DFEVar[][] pxxo = new DFEVar[4][4];
+		for(int i = 0; i < 4; i++)
+			for(int j = 0; j < 4; j++)
+				pxxo[i][j] = pxx[i][j].cast(dfeFix(6, 6, SignMode.TWOSCOMPLEMENT));
+		return pxxo;
+	}*/
+
+	@Override
+	public Matrix H(KalmanStub hit) {
+		DFEVar[][] h = new DFEVar[2][4];
+		for(int i = 0; i < 2; i++){
+			for(int j = 0; j < 4; j++){
+				if(i == 0 && j == 0)
+					h[i][j] = -hit.r();
+				else if(i == 0 && j == 1)
+					h[i][j] = getKernel().constant.var(1);//getKernel().constant.var(dfeUInt(1), 1);
+				else if(i == 1 && j == 2)
+					h[i][j] = hit.r();
+				else if(i == 1 && j == 3)
+					h[i][j] = getKernel().constant.var(1);//(dfeUInt(1), 1);
+				else
+					h[i][j] = getKernel().constant.var(0);//(dfeUInt(1), 0);
+			}
+		}
+		return new Matrix(h);
+	}
+
+	public static DFEStructType stXa(){
+		return stXa;
+	}
+
+	public static Map<String, KernelType<DFEVar>> types(){
+		Map<String, KernelType<DFEVar>> types = new HashMap<String, KernelType<DFEVar>>();
+		types.put("rInv", tRInv);
+		types.put("phi0", tPhi0);
+		types.put("t", tTanTheta);
+		types.put("z0", tZ0);
+		return types;
+	}
+
+	@Override
+	public Vector d(KalmanStub hit) {
+		DFEVar[] data = new DFEVar[2];
+		data[0] = hit.phi();
+		data[1] = hit.z();
+		return new Vector(data);
+	}
+
+	/*@Override
+	public Matrix pdd(KalmanStub hit){
+		DFEVar sigmaLength = hit.sigmaLength();
+		optimization.pushFixOpMode(Optimization.bitSizeExact(18), Optimization.offsetExact(-8), MathOps.MUL);
+		DFEVar multiplicand = hit.barrel() ? constant.var(1) : (hit.z() * hit.rInv());
+		//System.out.println("z * rInv = " + hit.z() * hit.rInv());
+		optimization.popFixOpMode(MathOps.MUL);
+		//System.out.println("sigmaPhi^2 = " + hit.sigmaPhi() * hit.sigmaPhi());
+		optimization.pushFixOpMode(Optimization.bitSizeExact(18), Optimization.offsetExact(-12), MathOps.MUL);
+		DFEVar oneOne = sigmaLength * multiplicand;
+		//oneOne.simWatch("sqrtpdd_11");
+		optimization.popFixOpMode(MathOps.MUL);
+		//System.out.println("oneOne = " + oneOne);
+		DFEVar[][] data = new DFEVar[2][2];
+		optimization.pushFixOpMode(Optimization.bitSizeExact(18), Optimization.offsetExact(-14), MathOps.MUL);
+		data[0][0] = hit.sigmaPhi() * hit.sigmaPhi();
+		optimization.popFixOpMode(MathOps.MUL);
+		optimization.pushFixOpMode(Optimization.bitSizeExact(18), Optimization.offsetExact(-6), MathOps.MUL);
+		data[1][1] = oneOne * oneOne;
+		optimization.popFixOpMode(MathOps.MUL);
+		data[0][1] = constant.var(0);
+		data[1][0] = constant.var(0);
+		return new Matrix(data);
+	}*/
+
+	@Override
+	public Matrix pdd(KalmanStub hit){
+		DFEVar[][] data = new DFEVar[2][2];
+		data[0][0] = hit.pdd00(this.stateIn);
+		data[1][1] = hit.pdd11(this.stateIn);
+		data[0][1] = constant.var(0);
+		data[1][0] = constant.var(0);
+		return new Matrix(data);
+	}
+
+	@Override
+	protected Matrix truncatePdd(Matrix pdd){
+		DFEType tPddDiag = dfeFix(9, 9, SignMode.TWOSCOMPLEMENT);
+		int maxVal = (int)Math.pow(2, 8) - 1;
+		int minVal = -(int)Math.pow(2, 8);
+		DFEVar[][] data = pdd.data();
+		DFEVar[][] newData = new DFEVar[2][2];
+		for(int i = 0; i < 2; i++){
+			optimization.pushPipeliningFactor(0);
+			DFEVar outOfBounds = data[i][i] > maxVal | data[i][i] < minVal;
+			DFEVar ifOutOfBounds = data[i][i] > 0 ? constant.var(maxVal) : constant.var(minVal);
+			newData[i][i] = optimization.pipeline(outOfBounds ? ifOutOfBounds : data[i][i].cast(tPddDiag));
+			optimization.popPipeliningFactor();
+		}
+		newData[0][1] = data[0][1];
+		newData[1][0] = data[1][0];
+		return new Matrix(newData);
+
+	}
+
+	@Override
+	protected Matrix truncatePxd(Matrix pxd){
+		DFEType tPxdDiag = dfeFix(9, 9, SignMode.TWOSCOMPLEMENT);
+		int maxVal = (int)Math.pow(2, 8) - 1;
+		int minVal = -(int)Math.pow(2, 8);
+		DFEVar[][] data = pxd.data();
+		DFEVar[][] newData = new DFEVar[2][2];
+		for(int i = 0; i < 2; i++){
+			optimization.pushPipeliningFactor(0);
+			DFEVar outOfBounds = data[i][i] > maxVal | data[i][i] < minVal;
+			DFEVar ifOutOfBounds = data[i][i] > 0 ? constant.var(maxVal) : constant.var(minVal);
+			newData[i][i] = optimization.pipeline(outOfBounds ? ifOutOfBounds : data[i][i].cast(tPxdDiag));
+			optimization.popPipeliningFactor();
+		}
+		newData[0][1] = data[0][1];
+		newData[1][0] = data[1][0];
+		return new Matrix(newData);
+
+	}
+
+	@Override
+	protected Matrix pxdOpt(ConstrainedCovarianceMatrix C, KalmanStub stub){
+		DFEVar[][] pxd = new DFEVar[4][2];
+		optimization.pushFixOpMode(Optimization.bitSizeExact(18), Optimization.offsetExact(-7), MathOps.MUL);
+		optimization.pushPipeliningFactor(DSPPipelineFactor);
+		//DFEVar rC00 = stub.r() * (constant.var(dfeUInt(1),0) # C.data(0, 0).slice(1, 17)).cast(dfeFix(-1, 19, SignMode.TWOSCOMPLEMENT)); // TODO check cast!d
+		DFEVar rC00 = stub.r() * C.data(0, 0);
+		optimization.popPipeliningFactor();
+		optimization.popFixOpMode(MathOps.MUL);
+		DFEVar rC01 = stub.r() * C.data(0, 1);
+		optimization.pushFixOpMode(Optimization.bitSizeExact(18), Optimization.offsetExact(-9), MathOps.MUL);
+		optimization.pushPipeliningFactor(DSPPipelineFactor);
+		DFEVar rC22 = stub.r() * C.data(2, 2);
+		//DFEVar rC22 = stub.r() * (constant.var(dfeUInt(1),0) # C.data(2, 2).slice(1, 17)).cast(dfeFix(-2, 20, SignMode.TWOSCOMPLEMENT)); // TODO check cast!
+		optimization.popPipeliningFactor();
+		optimization.popFixOpMode(MathOps.MUL);
+		DFEVar rC23 = stub.r() * C.data(2, 3);
+		optimization.pushFixOpMode(Optimization.bitSizeExact(18), Optimization.offsetLargestMsb(), MathOps.SUB);
+		pxd[0][0] = C.data(0, 1) - rC00;// + C.data(0, 1);
+		optimization.popFixOpMode(MathOps.SUB);
+		optimization.pushFixOpMode(Optimization.bitSizeExact(18), Optimization.offsetExact(-1), MathOps.SUB);
+		pxd[1][0] = C.data(1, 1) - rC01;// + C.data(1, 1);
+		optimization.popFixOpMode(MathOps.SUB);
+		optimization.pushFixOpMode(Optimization.bitSizeExact(18), Optimization.offsetExact(-10), MathOps.ADD);
+		pxd[2][1] = rC22 + C.data(2, 3);
+		optimization.popFixOpMode(MathOps.ADD);
+		optimization.pushFixOpMode(Optimization.bitSizeExact(18), Optimization.offsetExact(-4), MathOps.ADD);
+		pxd[3][1] = rC23 + C.data(3, 3);
+		optimization.popFixOpMode(MathOps.ADD);
+		pxd[0][1] = constant.var(0);
+		pxd[1][1] = constant.var(0);
+		pxd[2][0] = constant.var(0);
+		pxd[3][0] = constant.var(0);
+		this.rC01 = rC01;
+		this.rC23 = rC23;
+		System.out.println("rC00, rC01, rC22, rC23 = " + rC00+","+rC01+","+rC22+","+rC23);
+		//rC00.simWatch("rC00");
+		//rC01.simWatch("rC01");
+		//rC22.simWatch("rC22");
+		//rC23.simWatch("rC23");
+		return new Matrix(pxd);
+	}
+	@Override
+	protected Matrix pddInvOpt(ConstrainedCovarianceMatrix C, KalmanStub stub){
+		//debug.pushEnableNumericExceptions(true);
+		DFEVar[][] data = new DFEVar[2][2];
+		Matrix pdd = pdd(stub); // Measurement error
+		// Do the (0, 0) term
+		optimization.pushFixOpMode(Optimization.bitSizeExact(24), Optimization.offsetExact(-7), MathOps.MUL);
+		optimization.pushPipeliningFactor(DSPPipelineFactor);
+		//DFEVar numTerm0 = stub.rSquared() * (constant.var(dfeUInt(1),0) # C.data(0, 0).slice(1, 17)).cast(dfeFix(-1, 19, SignMode.TWOSCOMPLEMENT)); // TODO check cast!d
+		DFEVar numTerm0 = stub.rSquared() * C.data(0, 0);
+		optimization.popPipeliningFactor();
+		optimization.popFixOpMode(MathOps.MUL);
+		DFEVar numTerm1 = C.data(1, 1);
+		optimization.pushPipeliningFactor(DSPPipelineFactor);
+		DFEVar numTerm2 = (- 2) * rC01;
+		optimization.popPipeliningFactor();
+		DFEVar numTerm3 = pdd.data(0, 0);
+		System.out.println("pdd00_0 " + numTerm0);
+		System.out.println("pdd00_1 " + numTerm1);
+		System.out.println("pdd00_2 " + numTerm2);
+		System.out.println("pdd00_3 " + numTerm3);
+		//optimization.pushFixOpMode(Optimization.bitSizeExact(18), Optimization.offsetExact(-6), MathOps.ADD);
+		DFEType tNum0 = dfeFix(nPdd00IntBits, nPdd00FracBits, SignMode.TWOSCOMPLEMENT);
+		double maxVal = Math.pow(2, nPdd00IntBits-1) - Math.pow(2, -nPdd00FracBits);
+		double minVal = -Math.pow(2, nPdd00IntBits-1);
+		DFEVar numerator0 = (numTerm0 + numTerm1) + (numTerm2 + numTerm3);//stub.rSquared() * C.data(0, 0) + C.data(1, 1) + 2 * stub.r() * C.data(0, 1) + pdd.data(0, 0);
+		optimization.pushPipeliningFactor(0.0);
+		DFEVar num0Over = numerator0 > constant.var(tNum0,maxVal);
+		DFEVar num0NegOver = numerator0 < constant.var(tNum0, minVal);
+		DFEVar num0NoOver = (~num0Over) & (~num0NegOver);
+		DFEVar select0 = num0NoOver # num0NegOver # num0Over;
+		optimization.popPipeliningFactor();
+		select0 = optimization.pipeline(select0);
+		DFEVar numerator0Trunc = control.oneHotMux(select0, new DFEVar[]{constant.var(tNum0, maxVal), constant.var(tNum0, minVal), numerator0.cast(tNum0)});
+		//optimization.popFixOpMode(MathOps.ADD);
+		/*System.out.println("pdd00 " + numerator0);
+		System.out.println("pdd00_trunk " + numerator0Trunc);*/
+		//div0.setSimWatch("pdd00");
+		Divider.setWatch(true);
+		Divider div = new Divider(this.getKernel());
+		DFEVar denominator0 = div.reducedLUTDivideIgnore(numerator0Trunc, 11, 13, 35, 35, 6).cast(dfeRawBits(nPdd00InvIntBits + nPdd00InvFracBits)).cast(tPdd00Inv);
+		Divider.setWatch(false);
+		//DFEVar denominator0 = Divider.divInt18_1BRAM_2DSP(numerator0Trunc).cast(dfeRawBits(nPdd00InvIntBits + nPdd00InvFracBits)).cast(tPdd00Inv);
+		//optimization.pushFixOpMode(Optimization.bitSizeExact(nPdd00InvIntBits + nPdd00InvFracBits), Optimization.offsetExact(-nPdd00InvFracBits), MathOps.DIV);
+		//DFEVar denominator0 = 1 / numerator0Trunc;
+		//optimization.popFixOpMode(MathOps.DIV);
+
+		// Do the (1, 1) term
+		optimization.pushFixOpMode(Optimization.bitSizeExact(24), Optimization.offsetExact(-9), MathOps.MUL);
+		optimization.pushPipeliningFactor(DSPPipelineFactor);
+		//DFEVar num1Term0 = stub.rSquared() * (constant.var(dfeUInt(1),0) # C.data(2, 2).slice(1, 17)).cast(dfeFix(-2, 20, SignMode.TWOSCOMPLEMENT)); // TODO check cast!
+		DFEVar num1Term0 = stub.rSquared() * C.data(2, 2);
+		optimization.popPipeliningFactor();
+		optimization.popFixOpMode(MathOps.MUL);
+		DFEVar num1Term1 = C.data(3, 3);
+		//optimization.pushFixOpMode(Optimization.bitSizeExact(18), Optimization.offsetExact(-8), MathOps.MUL); // Based on first rSquared, tanTheta
+		optimization.pushPipeliningFactor(DSPPipelineFactor);
+		DFEVar num1Term2 = 2 * rC23;
+		optimization.popPipeliningFactor();
+		//optimization.popFixOpMode(MathOps.MUL);
+		DFEVar num1Term3 = pdd.data(1, 1);
+		//System.out.println("rC23: " + rC23);
+		//System.out.println("2 rC23: " + 2 * rC23);
+		/*System.out.println("pdd11_0 " + num1Term0);
+		System.out.println("pdd11_1 " + num1Term1);
+		System.out.println("pdd11_2 " + num1Term2);
+		System.out.println("pdd11_3 " + num1Term3);
+		System.out.println("pdd11_01 " + (num1Term0 + num1Term1));
+		System.out.println("pdd11_23 " + (num1Term2 + num1Term3));*/
+
+		double pdd11MaxVal = Math.pow(2, nPdd11IntBits - 1) - Math.pow(2, -nPdd11FracBits);
+		double pdd11MinVal = - Math.pow(2, nPdd11IntBits -1);
+
+		DFEVar numerator1 = (num1Term0 + num1Term1) + (num1Term2 + num1Term3);
+		optimization.pushPipeliningFactor(0.0);
+		DFEVar num1Over = numerator1 > constant.var(tPdd11, pdd11MaxVal); // Check for overflow
+		DFEVar num1NegOver = numerator1 < constant.var(tPdd11, pdd11MinVal); // Check for underflow
+		DFEVar num1NoOver = (~num1Over) & (~num1NegOver);
+		optimization.popPipeliningFactor();
+		DFEVar select1 = num1NoOver # num1NegOver # num1Over;
+		select1 = optimization.pipeline(select1);
+		DFEVar numerator1Trunc = control.oneHotMux(select1, new DFEVar[]{constant.var(tPdd11, pdd11MaxVal), constant.var(tPdd11, pdd11MinVal), numerator1.cast(tPdd11)});
+		/*System.out.println("pdd11 " + numerator1);
+		System.out.println("pdd11Trunc " + numerator1Trunc);*/
+		//div1.setSimWatch("pdd11");
+
+		//optimization.pushFixOpMode(Optimization.bitSizeExact(nPdd11InvIntBits + nPdd11InvFracBits), Optimization.offsetExact(-nPdd11InvFracBits), MathOps.DIV);
+		//DFEVar denominator1 = 1 / numerator1Trunc;
+		//DFEVar denominator1 = Divider.divInt18_1BRAM_2DSP(numerator1Trunc).cast(dfeRawBits(nPdd11InvIntBits + nPdd11InvFracBits)).cast(tPdd11Inv);
+		Divider div11 = new Divider(getKernel());
+		DFEVar denominator1 = div11.reducedLUTDivideIgnore(numerator1Trunc, 11, 13, 35, 35, 6).cast(dfeRawBits(nPdd11InvIntBits + nPdd11InvFracBits)).cast(tPdd11Inv);
+
+		//optimization.popFixOpMode(MathOps.DIV);
+		data[0][0] = denominator0;
+		data[1][1] = denominator1;
+		data[0][1] = constant.var(0);
+		data[1][0] = constant.var(0);
+
+		/* Watches */
+		if(doWatches){
+			toInt(rC01).simWatch("rC01");
+			toInt(numerator0).simWatch("pdd00PreTrunc");
+			toInt(numerator0Trunc).simWatch("pdd00Trunc");
+			toInt(numTerm0).simWatch("pdd00_0");
+			toInt(numTerm1).simWatch("pdd00_1");
+			toInt(numTerm2).simWatch("pdd00_2");
+			toInt(numTerm3).simWatch("pdd00_3");
+
+			toInt(numerator1).simWatch("pdd11PreTrunc");
+			toInt(numerator1Trunc).simWatch("pdd11Trunc");
+			toInt(num1Term0).simWatch("pdd11_0");
+			toInt(num1Term1).simWatch("pdd11_1");
+			toInt(num1Term2).simWatch("pdd11_2");
+			toInt(num1Term3).simWatch("pdd11_3");
+			toInt(num1Term0 + num1Term1).simWatch("pdd11_01");
+			toInt(num1Term2 + num1Term3).simWatch("pdd11_23");
+		}
+		//debug.popEnableNumericExceptions();
+		return new Matrix(data);
+	}
+
+	@Override
+	protected Matrix pddOpt(ConstrainedCovarianceMatrix C, KalmanStub stub){
+		DFEVar[][] data = new DFEVar[2][2];
+		Matrix pdd = pdd(stub); // Measurement error
+		// Do the (0, 0) term
+		optimization.pushFixOpMode(Optimization.bitSizeExact(24), Optimization.offsetExact(-10), MathOps.MUL);
+		DFEVar numTerm0 = stub.rSquared() * C.data(0, 0);
+		numTerm0.simWatch("pdd00_0");
+		optimization.popFixOpMode(MathOps.MUL);
+		DFEVar numTerm1 = C.data(1, 1);
+		DFEVar numTerm2 = (- 2) * (stub.r() * C.data(0, 1));
+		DFEVar numTerm3 = pdd.data(0, 0);
+		//optimization.pushFixOpMode(Optimization.bitSizeExact(18), Optimization.offsetExact(-6), MathOps.ADD);
+		DFEType tNum0 = dfeFix(nPdd00IntBits, nPdd00FracBits, SignMode.TWOSCOMPLEMENT);
+		double maxVal = Math.pow(2, nPdd00IntBits-1) - Math.pow(2, -nPdd00FracBits);
+		double minVal = -Math.pow(2, nPdd00IntBits-1);
+		DFEVar numerator0 = (numTerm0 + numTerm1) + (numTerm2 + numTerm3);//stub.rSquared() * C.data(0, 0) + C.data(1, 1) + 2 * stub.r() * C.data(0, 1) + pdd.data(0, 0);
+		DFEVar num0Over = numerator0 > constant.var(tNum0,maxVal);
+		DFEVar num0NegOver = numerator0 < constant.var(tNum0, minVal);
+		DFEVar num0NoOver = (~num0Over) & (~num0NegOver);
+		DFEVar select0 = num0NoOver # num0NegOver # num0Over;
+		DFEVar numerator0Trunc = control.oneHotMux(select0, new DFEVar[]{constant.var(tNum0, maxVal), constant.var(tNum0, minVal), numerator0.cast(tNum0)});
+		//optimization.popFixOpMode(MathOps.ADD);
+		numerator0Trunc.simWatch("pdd00_trunc");
+		select0.simWatch("select0");
+		// Do the (1, 1) term
+		optimization.pushFixOpMode(Optimization.bitSizeExact(18), Optimization.offsetExact(-8), MathOps.MUL); // Based on first rSquared, tanTheta
+		DFEVar num1Term0 = stub.rSquared() * C.data(2, 2);
+		optimization.popFixOpMode(MathOps.MUL);
+		DFEVar num1Term1 = C.data(3, 3);
+		optimization.pushFixOpMode(Optimization.bitSizeExact(18), Optimization.offsetExact(-8), MathOps.MUL); // Based on first rSquared, tanTheta
+		DFEVar num1Term2 = 2 * stub.r() * C.data(2, 3);
+		optimization.popFixOpMode(MathOps.MUL);
+		DFEVar num1Term3 = pdd.data(1, 1);
+		DFEVar numerator1 = (num1Term0 + num1Term1) + (num1Term2 + num1Term3);
+
+		data[0][0] = numerator0;
+		data[1][1] = numerator1;
+		data[0][1] = constant.var(0);
+		data[1][0] = constant.var(0);
+		return new Matrix(data);
+	}
+}

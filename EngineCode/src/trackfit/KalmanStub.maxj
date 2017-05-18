@@ -1,0 +1,231 @@
+package trackfit;
+
+import com.maxeler.maxcompiler.v2.kernelcompiler.Kernel;
+import com.maxeler.maxcompiler.v2.kernelcompiler.Optimization;
+import com.maxeler.maxcompiler.v2.kernelcompiler.op_management.MathOps;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.KernelMath;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.memory.Memory;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEFix.SignMode;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStruct;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStructType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStructType.StructFieldType;
+
+import formats.Constants;
+import formats.State;
+import formats.Stub;
+
+public class KalmanStub extends Stub{
+
+	private final DFEType tRInv = dfeFix(-7, 19, SignMode.UNSIGNED);//dfeFixMax(18, 1, SignMode.UNSIGNED);
+	private final DFEType tRSquared = dfeFixMax(22, Math.pow(1100 * Constants.rMult(), 2), SignMode.TWOSCOMPLEMENT); // Based on maximum radius, 18 bits
+	private final static DFEType tPdd00 = dfeFix(4, 14, SignMode.UNSIGNED);
+	private final static DFEType tPdd11 = dfeFix(12, 6, SignMode.UNSIGNED);
+	private final StructFieldType sftRInv = new StructFieldType("rInv", tRInv);
+	private static double DSPPipelineFactor = 1.;
+
+	private final DFEStructType stKStub = new DFEStructType(sftRInv);
+	private final DFEStruct KSdata;
+	private DFEVar sigmaPhi;
+	private DFEVar sigmaLengthSq;
+	private DFEVar rSquared;
+	//private final DFEVar pdd00Alt;
+	private final DFEVar barrel;
+
+	public KalmanStub(Kernel owner, DFEStruct dataS){
+		super(owner, dataS);
+
+		KSdata = stKStub.newInstance(owner);
+		KSdata["rInv"] <== rInvLut(r());
+
+		this.barrel = KernelMath.abs(z()) < Constants.endcapZBoundaries()[0];
+	}
+
+	public static KalmanStub input(Kernel owner, String name){
+		owner.io.pushInputRegistering(false);
+		owner.io.forceInputsTogether(name+"_z", name+"_r", name+"_phi", name+"_layerID", name+"_valid");
+		DFEStruct dataS = stStubIn.newInstance(owner);
+		dataS["z"] <== owner.io.input(name+"_z", tZ);
+		dataS["r"] <== owner.io.input(name+"_r", tR);
+		dataS["phi"] <== owner.io.input(name+"_phi", tPhi);
+		dataS["layerID"] <== owner.io.input(name+"_layerID", tLayerID);
+		dataS["valid"] <== owner.io.input(name+"_valid", tValid);
+		return new KalmanStub(owner, dataS);
+	}
+
+	public static KalmanStub wideInput(Kernel owner, String name){
+		DFEStruct dataS = owner.io.input(name, stStubIn);
+		return new KalmanStub(owner, dataS);
+	}
+
+	public void output(String name){
+
+	}
+
+	public void watch(String name){
+		super.data().simWatch(name);
+		this.KSdata.simWatch(name+"KS");
+	}
+
+
+	public DFEVar rInv(){ return KSdata["rInv"]; }
+	public DFEVar barrel(){ return barrel; }
+
+	// LUT for unsigned r inverse
+    public DFEVar rInvLut(DFEVar r){
+    	int nrBits = tR.getTotalBits();
+        int nRInvBits = tRInv.getTotalBits();;
+        int rVal = 0;
+        int rMaxVal = (int) Math.pow(2, nrBits) - 1;
+        //int rMinVal = (int) - Math.pow(2, nrBits - 1);
+        double[] rInvLut = new double[(int)Math.pow(2, nrBits)];
+        for(int n = 0; n < Math.pow(2, nrBits); n++){
+            if(rVal == 0){
+                rInvLut[n] = (int) Math.pow(2, nrBits - 1) - 1;
+            }else{
+                double rInvVal = 1. / (rVal) / Constants.rInvBase();
+                //System.out.println("rInv" + rInvVal);
+                if(rInvVal > Math.pow(2, nRInvBits)-1)
+                    System.out.println("Got an rInvVal too big for assigned type: " + rInvVal + " > " + (Math.pow(2, nRInvBits)-1) );
+                rInvLut[n] = rInvVal;
+            }
+            rVal++;
+        }
+        DFEVar[] rInvLutDFE = new DFEVar[(int) Math.pow(2, nrBits)];
+        for(int n = 0; n < Math.pow(2, nrBits); n++){
+            rInvLutDFE[n] = constant.var(tRInv, rInvLut[n]);
+        }
+        return control.mux(r.pack(), rInvLutDFE);
+
+    }
+
+    public DFEVar dPhiLUT(DFEVar r){
+    	int nRBitsForLUT = 11;
+    	int nVals = (int) Math.pow(2, nRBitsForLUT);
+    	DFEVar rAddr = r.slice(r.getType().getTotalBits() - nRBitsForLUT, nRBitsForLUT); // Only use the LSBs
+    	double dPhi_sq[] = new double[nVals];
+    	for(int n = 0; n < nVals; n++){
+    		double r_mm = Constants.rHWUToMm(n); // Only because r is actually 11 bits
+    		if(r_mm < 180)
+    			r_mm = 180; // Because 1/r will go huge, and is unphysical
+    		// Calculate the (pitch/r)^2 constant
+    		Stub.ModuleType moduleTypeB = Stub.moduleType(r_mm, 0); // ModuleType assuming barrel
+    		double pitch = moduleTypeB.pitch(); // This should be the same regardless of barrel/ec
+    		double dphi = pitch / r_mm / Math.sqrt(12);
+    		double dPhi_HWU = Constants.radToHWU(dphi);
+    		double dPhi_sq_HWU = dPhi_HWU * dPhi_HWU;
+    		dPhi_sq[n] = dPhi_sq_HWU;
+    		if(dPhi_sq_HWU > Math.pow(2, 4) - Math.pow(2, -14)){
+    			System.out.println("n, r, dPhi2 = " + n+", "+r_mm +", "+ dPhi_sq_HWU);
+    		}
+    		/*System.out.println("rAddr: " + n);
+    		System.out.println("r_mm: " + r_mm);
+    		System.out.println("dPhi: " + dphi);
+    		System.out.println("dPhi_HWU: " + dPhi_HWU);
+    		System.out.println("dPhi_sq_HWU: " + dPhi_sq_HWU);*/
+    	}
+    	Memory<DFEVar> dPhiROM = mem.alloc(tPdd00, nVals);
+    	dPhiROM.setContents(dPhi_sq);
+    	KFWorker.toInt(dPhiROM.read(rAddr)).simWatch("dPhiLUT");
+    	return dPhiROM.read(rAddr);
+    }
+
+    public DFEVar dQoverPt(DFEVar m){
+    	int nMBits = State.metadata.MBIN_HT.type().getTotalBits();
+    	int nMAddrs = (int) Math.pow(2, nMBits);
+    	int mMaxVal = (int) Math.pow(2, nMBits - 1);
+    	double dQoverPt_sq[] = new double[nMAddrs];
+    	double maxFound = 0;
+    	for (int n = 0; n < nMAddrs; n++){
+    		double mVal = n < mMaxVal ? n + 0.5 : (n - 2 * mMaxVal) + 0.5;
+    		double rInvVal = Constants.radToHWU(Constants.mToInv2R(mVal)) / Constants.rMult(); // rMult is here to cancel rMult in the lengthsq
+    		double rInvValSq = rInvVal * rInvVal * 1.05 * 1.05;
+    		System.out.println("rInvValSq = " + rInvValSq);
+    		dQoverPt_sq[n] = rInvValSq;
+    		maxFound = rInvValSq > maxFound ? rInvValSq : maxFound;
+    	}
+    	Memory<DFEVar> dQOverPtROM = mem.alloc(dfeFixMax(17, maxFound, SignMode.TWOSCOMPLEMENT), nMAddrs);
+    	dQOverPtROM.setContents(dQoverPt_sq);
+    	DFEVar dQoverPt = dQOverPtROM.read(m.pack()) * sigmaLengthSq();
+    	System.out.println("dQOverPtLUT = " + dfeFixMax(17, maxFound, SignMode.TWOSCOMPLEMENT));
+    	System.out.println("dQoverPt = " + dQoverPt);
+    	KFWorker.toInt(dQOverPtROM.read(m.pack())).simWatch("inv2R2");
+    	dQOverPtROM.read(m.pack()).simWatch("inv2R2");
+    	KFWorker.toInt(sigmaLengthSq).simWatch("dQOverPt");
+    	return dQoverPt;
+    }
+
+    public DFEVar rSquared(){
+    	if(this.rSquared == null){
+    		optimization.pushFixOpMode(Optimization.bitSizeAll(), Optimization.offsetNoOverflow(), MathOps.MUL);
+    		optimization.pushPipeliningFactor(DSPPipelineFactor);
+    		//DFEVar rBits = r().cast(dfeRawBits(r().getType().getTotalBits()));
+    		//DFEVar signedRBits = (constant.var(dfeUInt(1), 0) # rBits).cast(dfeInt(r().getType().getTotalBits() + 1)); // Horrible way to add a leading 0 to make 'signed'
+    		this.rSquared = (r() * r());//.cast(tRSquared);
+    		optimization.popPipeliningFactor();
+    		optimization.popFixOpMode(MathOps.MUL);
+    	}
+    	return this.rSquared;
+    }
+
+    public DFEVar pdd00(KalmanState state){
+    	DFEVar pdd00EndcapSummand = barrel() ? 0 : dQoverPt(state.metadata("MBIN_HT"));
+    	return dPhiLUT(r()) + pdd00EndcapSummand;
+    }
+
+    public DFEVar pdd11(KalmanState state){
+    	DFEVar tanL = state.x().data(2);
+    	optimization.pushFixOpMode(Optimization.bitSizeExact(18), Optimization.offsetExact(-9), MathOps.MUL);
+    	DFEVar tanL_sq = (tanL * tanL) * (0.9*0.9);
+    	optimization.popFixOpMode(MathOps.MUL);
+    	DFEVar zMultiplicand = barrel() ? 1 : tanL_sq;
+    	DFEVar sigmaLength_sq = this.sigmaLengthSq();
+    	optimization.pushFixOpMode(Optimization.bitSizeExact(18), Optimization.offsetExact(-5), MathOps.MUL);
+    	DFEVar pdd11 = zMultiplicand * sigmaLength_sq;
+    	optimization.popFixOpMode(MathOps.MUL);
+    	//tanL_sq.simWatch("tanL2");
+    	return pdd11;
+    }
+
+    public DFEVar sigmaLengthSq(){
+    	if(this.sigmaLengthSq == null){
+        	DFEVar[] sigmaLengths = new DFEVar[2];
+        	double psSq = Stub.ModuleType.PSENDCAP.length() * Stub.ModuleType.PSENDCAP.length() * Constants.rMult() * Constants.rMult();
+        	double twosSq = Stub.ModuleType.TWOSENDCAPOUTER.length() * Stub.ModuleType.TWOSENDCAPOUTER.length() * Constants.rMult() * Constants.rMult();
+        	double digitisationErr = 1.5625 * 1.5625 * Constants.rMult() * Constants.rMult() / 12; // Error from digitising the stub
+        	sigmaLengths[0] = constant.var(dfeFixMax(18, 211, SignMode.TWOSCOMPLEMENT), psSq / 12 + digitisationErr);
+        	sigmaLengths[1] = constant.var(dfeFixMax(18, 211, SignMode.TWOSCOMPLEMENT), twosSq / 12 + digitisationErr);
+        	this.sigmaLengthSq = r() < Constants.rMmToHWU(600) ? sigmaLengths[0] : sigmaLengths[1];
+        	KFWorker.toInt(this.sigmaLengthSq).simWatch("b");
+    	}
+    	return this.sigmaLengthSq;
+    }
+
+    /*public DFEVar sigmaLengthSqPhiUnits(){
+    	if(this.sigmaLengthSqPhiUnits == null){
+        	DFEVar[] sigmaLengths = new DFEVar[2];
+        	double psSq = Stub.ModuleType.PSENDCAP.length() * Stub.ModuleType.PSENDCAP.length() * Constants.rMult() * Constants.rMult();
+        	double twosSq = Stub.ModuleType.TWOSENDCAPOUTER.length() * Stub.ModuleType.TWOSENDCAPOUTER.length() * Constants.rMult() * Constants.rMult();
+        	double digitisationErr = 0.15625 * 1.15625 * Constants.rMult() * Constants.rMult() / 12; // Error from digitising the stub
+        	sigmaLengths[0] = constant.var(dfeFixMax(18, 211, SignMode.TWOSCOMPLEMENT), psSq / 12 + digitisationErr);
+        	sigmaLengths[1] = constant.var(dfeFixMax(18, 211, SignMode.TWOSCOMPLEMENT), twosSq / 12 + digitisationErr);
+        	this.sigmaLengthSqPhiUnits = r() < Constants.rMmToHWU(600) ? sigmaLengths[0] : sigmaLengths[1];
+    	}
+    	return this.sigmaLengthSqUnits;
+    }*/
+    // Calculate sigmaPhi from sigmaWidth and [1/r]
+    // Fanout signal if called more than once
+	/*public DFEVar sigmaPhi(){
+		if(this.sigmaPhi == null){
+			optimization.pushFixOpMode(Optimization.bitSizeExact(18), Optimization.offsetExact(-16), MathOps.MUL);
+			this.sigmaPhi = sigmaPitch() * rInv();
+			optimization.popFixOpMode(MathOps.MUL);
+		}
+		return this.sigmaPhi;
+	}*/
+
+	public static void setDSPPipelineFactor(double f){
+		DSPPipelineFactor = f;
+	}
+}

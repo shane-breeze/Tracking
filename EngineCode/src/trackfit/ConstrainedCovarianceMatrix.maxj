@@ -1,0 +1,86 @@
+package trackfit;
+
+import matrix.FOM;
+import matrix.Matrix;
+
+import com.maxeler.maxcompiler.v2.kernelcompiler.Kernel;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
+
+public class ConstrainedCovarianceMatrix extends Matrix{
+
+	public ConstrainedCovarianceMatrix(DFEVar[] data, int dim){
+		// A class to store the covariance matrix for the KF when the two fit planes are independent
+		// This leads to a block diagonal matrix with 0 matrix blocks on the off-diagonal
+		super(data[0].getKernel());
+		DFEVar[][] data2D = new DFEVar[dim][dim];
+		for(int i = 0; i < dim; i++){
+			for(int j = 0; j < dim; j++){
+				data2D[i][j] = constant.var(0);//dfeUInt(1), 0);
+			}
+		}
+		for(int i = 0; i < dim; i++)
+			data2D[i][i] = data[i];
+		data2D[0][1] = data[dim];
+		data2D[1][0] = data[dim];
+		data2D[2][3] = data[dim+1];
+		data2D[3][2] = data[dim+1];
+		data(data2D); // Set the LinAlg data member to data2D
+	}
+
+	public ConstrainedCovarianceMatrix(DFEVar[][] data){
+		super(data[0][0].getKernel());
+		data(data);
+	}
+
+	public ConstrainedCovarianceMatrix(Kernel owner){
+		super(owner);
+	}
+
+	public static ConstrainedCovarianceMatrix mux(DFEVar select, ConstrainedCovarianceMatrix[] options){
+		System.err.println("ConstrainedCovarianceMatrix method mux not implemented yet.");
+		return new ConstrainedCovarianceMatrix(select.getKernel());
+	}
+
+	public Matrix toMatrix(){
+		return new Matrix(this.data);
+	}
+
+	public static ConstrainedCovarianceMatrix toCCM(Matrix m){
+		DFEVar[] data = new DFEVar[6];
+		for(int i = 0; i < 4; i++)
+			data[i] = m.data(i, i);
+		data[4] = m.data(0, 1);
+		data[5] = m.data(2, 3);
+		return new ConstrainedCovarianceMatrix(data, 4);
+	}
+
+	public ConstrainedCovarianceMatrix positivify(){
+		DFEVar[][] newData = new DFEVar[4][4];
+		for(int i = 0; i< 4; i++){
+			for(int j = 0; j < 4; j++){
+				if(i == j)
+					newData[i][i] = (this.data[i][i] > 0) ? this.data[i][i] : -this.data[i][i];
+				else
+					newData[i][j] = this.data[i][j];
+			}
+		}
+		return new ConstrainedCovarianceMatrix(newData);
+	}
+
+	public ConstrainedCovarianceMatrix positivifyCast(FOM[][] pxxFom){
+		DFEVar[][] newData = new DFEVar[4][4];
+		for(int i = 0; i< 4; i++){
+			for(int j = 0; j < 4; j++){
+				if(i == j)
+					newData[i][i] = (this.data[i][i] > 0) ? pxxFom[i][i].cast(this.data[i][i]) : pxxFom[i][i].cast(-this.data[i][i]);
+				else
+					newData[i][j] = this.data[i][j];
+			}
+		}
+		newData[0][1] = pxxFom[0][1].cast(this.data[0][1]);
+		newData[1][0] = pxxFom[1][0].cast(this.data[1][0]);
+		newData[2][3] = pxxFom[2][3].cast(this.data[2][3]);
+		newData[3][2] = pxxFom[3][2].cast(this.data[3][2]);
+		return new ConstrainedCovarianceMatrix(newData);
+	}
+}
