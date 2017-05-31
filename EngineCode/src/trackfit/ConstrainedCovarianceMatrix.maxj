@@ -8,9 +8,14 @@ import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
 
 public class ConstrainedCovarianceMatrix extends Matrix{
 
+	/**
+	 *  A class to store the covariance matrix for the KF when the two fit planes are independent
+	 *	This leads to a block diagonal matrix with 0 matrix blocks on the off-diagonal
+	 * @param data
+	 * @param dim
+	 */
 	public ConstrainedCovarianceMatrix(DFEVar[] data, int dim){
-		// A class to store the covariance matrix for the KF when the two fit planes are independent
-		// This leads to a block diagonal matrix with 0 matrix blocks on the off-diagonal
+
 		super(data[0].getKernel());
 		DFEVar[][] data2D = new DFEVar[dim][dim];
 		for(int i = 0; i < dim; i++){
