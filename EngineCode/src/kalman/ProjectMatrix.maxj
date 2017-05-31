@@ -1,0 +1,38 @@
+package kalman;
+
+import matrix.Matrix;
+
+import com.maxeler.maxcompiler.v2.kernelcompiler.Kernel;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
+
+/***
+ * Class to represent Kalman 'H' matrix
+ * @author sioni
+ * https://github.com/cms-sw/cmssw/blob/master/DataFormats/Math/interface/ProjectMatrix.h
+ */
+public class ProjectMatrix{
+
+	private final int[] index;
+	private final int D;
+	private final int N;
+
+	public ProjectMatrix(int[] index, int D, int N){
+		this.index = index;
+		this.D = D;
+		this.N = N;
+	}
+
+	public Matrix H(Kernel k){
+		DFEVar[][] h = new DFEVar[D][N];
+		for(int i = 0; i < D; i++){
+			for(int j = 0; j < N; j++){
+				h[i][j] = k.constant.var(0);
+			}
+		}
+		for(int i = 0; i < D; i++){
+			h[i][index[i]] = k.constant.var(1);
+		}
+		return new Matrix(h);
+	}
+
+}

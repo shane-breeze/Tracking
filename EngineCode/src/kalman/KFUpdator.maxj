@@ -1,0 +1,54 @@
+package kalman;
+
+import matrix.Matrix;
+import matrix.Vector;
+
+import com.maxeler.maxcompiler.v2.kernelcompiler.Kernel;
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelLib;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
+
+import division.Inverter;
+import formats.TrajectoryState;
+
+public class KFUpdator extends KernelLib{
+
+	Kernel owner;
+
+	private static class lowLatencyInvert implements Inverter{
+		public DFEVar invert(DFEVar x){
+			return division.Divider.reducedLUTDivideFloat(x, 11, 25);
+		}
+	}
+
+	public KFUpdator(Kernel owner){
+		super(owner);
+		this.owner = owner;
+
+	}
+
+	public TrajectoryState update(TrajectoryState state, Vector r, Vector rMeas, Matrix V, Matrix VMeas, ProjectMatrix H){
+
+		Vector x = state.vector();
+		Matrix C = state.matrix();
+
+		int dimension = C.nCols();
+		r -= rMeas;
+
+		Matrix R = V + VMeas;
+
+		Matrix.setInversionAlgorithm(new lowLatencyInvert());
+		Matrix RInv = R.inverse();
+
+		Matrix K = (Matrix) ((C * H.H(owner)) * RInv);
+		Matrix KH = (Matrix) (K * H.H(owner));
+
+		Matrix M = Matrix.identity(owner, dimension) - KH;
+
+		Vector x_up = x + (Vector) (K * r);
+
+		Matrix C_up = (Matrix) (M * C * M) + (Matrix) (K * V * K);
+
+		return new TrajectoryState(x_up, C_up);
+	}
+
+}
