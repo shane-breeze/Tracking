@@ -14,6 +14,14 @@ import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEVectorType;
 
 public class TrajectoryState {
 
+	public enum label{
+		X ("x"),
+		C ("c");
+
+		private String label;
+		private label(String l){ this.label = l; }
+		public String label(){ return this.label; }
+	}
 	Vector x;
 	Matrix C;
 
@@ -39,47 +47,30 @@ public class TrajectoryState {
 		return new SymMatrix<DFEVar>(C);
 	}
 
-	public DFEStruct io(){
+	public DFEStruct packForIO(){
 		DFEStruct struct = this.ioType().newInstance(x.getKernel());
-		struct.get("v") <== x.toDFEVector();
-		struct.get("m") <== symMatrix().dataVector();
+		struct.get(label.X.label()) <== x.packForIO();
+		struct.get(label.C.label()) <== symMatrix().dataVector();
 		return struct;
 	}
 
 	public DFEStructType ioType(){
 		// Construct an entry for the vector
-		KernelType tv;
-		// Check all data has the same type
-		DFEType tX = x.data(0, 0).getType();
-		boolean sameType = true;
-		for(int i = 0; i < x.nRows(); i++){
-			for(int j = 0; j < x.nCols(); j++){
-				sameType = x.data(i, j).getType() == tX;
-			}
-		}
-		if(sameType){
-			tv = new DFEVectorType<DFEVar>(tX, x.nCols());
-		}else{
-			StructFieldType[] sfts = new StructFieldType[x.nCols()];
-			for(int i = 0; i < x.nCols(); i++){
-				sfts[i] = new StructFieldType(""+i, x.data(0, i).getType());
-			}
-			tv = new DFEStructType(sfts);
-		}
-		StructFieldType sftVector = new StructFieldType("v", tv);
+		KernelType tv = x.packForIO().getType();
+		StructFieldType sftVector = new StructFieldType(label.X.label(), tv);
 
 		KernelType tm = symMatrix().dataVector().getType();
-		StructFieldType sftMatrix = new StructFieldType("m", tm);
+		StructFieldType sftMatrix = new StructFieldType(label.C.label(), tm);
 
 		return new DFEStructType(sftVector, sftMatrix);
 	}
 
 	public static DFEStructType ioType(DFEType T, int D){
 		DFEVectorType<DFEVar> tv = new DFEVectorType<DFEVar>(T, D);
-		StructFieldType sftVector = new StructFieldType("v", tv);
+		StructFieldType sftVector = new StructFieldType(label.X.label(), tv);
 
 		DFEVectorType<DFEVar> tm = SymMatrix.ioType(T, D);
-		StructFieldType sftMatrix = new StructFieldType("m", tm);
+		StructFieldType sftMatrix = new StructFieldType(label.C.label(), tm);
 
 		return new DFEStructType(sftVector, sftMatrix);
 

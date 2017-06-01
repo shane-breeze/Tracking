@@ -52,6 +52,8 @@ public class single_updator extends Kernel{
 		// Do the update
 		TrajectoryState ts_up = updator.update(ts, hit, pf);
 
+		DFEStruct outData = ts_up.packForIO();
+		io.output("state_up", outData, ts_up.ioType());
 
 	}
 
