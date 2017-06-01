@@ -1,6 +1,8 @@
 package kalman;
 
+import matrix.LinAlg;
 import matrix.Matrix;
+import matrix.SymMatrix;
 import matrix.Vector;
 
 import com.maxeler.maxcompiler.v2.kernelcompiler.Kernel;
@@ -8,6 +10,7 @@ import com.maxeler.maxcompiler.v2.kernelcompiler.KernelLib;
 import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
 
 import division.Inverter;
+import formats.TrackingRecHit;
 import formats.TrajectoryState;
 
 public class KFUpdator extends KernelLib{
@@ -26,18 +29,24 @@ public class KFUpdator extends KernelLib{
 
 	}
 
-	public TrajectoryState update(TrajectoryState state, Vector r, Vector rMeas, Matrix V, Matrix VMeas, ProjectMatrix H){
+	public TrajectoryState update(TrajectoryState state, TrackingRecHit hit, ProjectMatrix H){
 
 		Vector x = state.vector();
 		Matrix C = state.matrix();
 
+		Vector r = hit.pos();
+		Vector rMeas = (Vector) (H.H(owner) * x);
+
+		SymMatrix<DFEVar> V = hit.errors();
+		SymMatrix<DFEVar> VMeas = new SymMatrix<DFEVar>((Matrix) (H.H(owner) * C * LinAlg.transpose(H.H(owner))));
+
 		int dimension = C.nCols();
 		r -= rMeas;
 
-		Matrix R = V + VMeas;
+		SymMatrix<DFEVar> R = V + VMeas;
 
 		Matrix.setInversionAlgorithm(new lowLatencyInvert());
-		Matrix RInv = R.inverse();
+		Matrix RInv = R.matrix().inverse();
 
 		Matrix K = (Matrix) ((C * H.H(owner)) * RInv);
 		Matrix KH = (Matrix) (K * H.H(owner));
@@ -46,7 +55,7 @@ public class KFUpdator extends KernelLib{
 
 		Vector x_up = x + (Vector) (K * r);
 
-		Matrix C_up = (Matrix) (M * C * M) + (Matrix) (K * V * K);
+		Matrix C_up = (Matrix) (M * C * M) + (Matrix) (K * V.matrix() * LinAlg.transpose(K));
 
 		return new TrajectoryState(x_up, C_up);
 	}
