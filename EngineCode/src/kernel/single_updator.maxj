@@ -37,8 +37,8 @@ public class single_updator extends Kernel{
 
 		// Repackage the trajectory
 		DFEStruct tsData = (DFEStruct) inData.get("trajectoryState");
-		DFEVector<DFEVar> xData = (DFEVector<DFEVar>) tsData["v"];
-		DFEVector<DFEVar> cData = (DFEVector<DFEVar>) tsData["m"];
+		DFEVector<DFEVar> xData = (DFEVector<DFEVar>) tsData.get(TrajectoryState.label.X.label());
+		DFEVector<DFEVar> cData = (DFEVector<DFEVar>) tsData.get(TrajectoryState.label.C.label());;
 		Vector x = new Vector(xData);
 		SymMatrix<DFEVar> C = new SymMatrix<DFEVar>(this, cData.packToList());
 		TrajectoryState ts = new TrajectoryState(x, C);
