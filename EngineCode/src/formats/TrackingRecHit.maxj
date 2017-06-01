@@ -3,7 +3,6 @@ package formats;
 import matrix.SymMatrix;
 import matrix.Vector;
 
-import com.maxeler.maxcompiler.v2.kernelcompiler.types.KernelType;
 import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEType;
 import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
 import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStruct;
@@ -14,11 +13,11 @@ import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEVectorType;
 
 public class TrackingRecHit {
 
-	private enum labels{
+	public enum label{
 		POS ("pos"),
 		ERRORS ("errors");
 		private final String label;
-		private labels(String label){
+		private label(String label){
 			this.label = label;
 		}
 		public String label(){ return this.label; }
@@ -28,15 +27,15 @@ public class TrackingRecHit {
 	private final SymMatrix<DFEVar> errors;
 
 	public TrackingRecHit(DFEStruct data){
-		this.pos = new Vector((DFEVector<DFEVar>) data.get(labels.POS.label()));
-		this.errors = new SymMatrix<DFEVar>(data.getKernel(), ((DFEVector<DFEVar>) data.get(labels.ERRORS.label())).getElementsAsList());
+		this.pos = new Vector((DFEVector<DFEVar>) data.get(label.POS.label()));
+		this.errors = new SymMatrix<DFEVar>(data.getKernel(), ((DFEVector<DFEVar>) data.get(label.ERRORS.label())).getElementsAsList());
 	}
 
-	public static KernelType ioType(DFEType T, int D){
+	public static DFEStructType ioType(DFEType T, int D){
 		DFEVectorType<DFEVar> tErrors = SymMatrix.ioType(T, D);
 		DFEVectorType<DFEVar> tPos = new DFEVectorType<DFEVar>(T, D);
-		StructFieldType sftPos = new StructFieldType(labels.POS.label(), tPos);
-		StructFieldType sftErrors = new StructFieldType(labels.ERRORS.label(), tErrors);
+		StructFieldType sftPos = new StructFieldType(label.POS.label(), tPos);
+		StructFieldType sftErrors = new StructFieldType(label.ERRORS.label(), tErrors);
 		DFEStructType tRecHit = new DFEStructType(sftPos, sftErrors);
 		return tRecHit;
 	}

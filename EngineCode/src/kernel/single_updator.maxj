@@ -20,13 +20,12 @@ import formats.TrajectoryState;
 
 public class single_updator extends Kernel{
 
-	DFEType T = DFETypeFactory.dfeFloat(8, 24);
+	public static DFEType T = DFETypeFactory.dfeFloat(8, 24);
+	public static int D = 2;
+	public static int N = 5;
 
 	public single_updator(KernelParameters params){
 		super(params);
-
-		int D = 2;
-		int N = 5;
 
 		ProjectMatrix pf = new ProjectMatrix(new int[]{3, 4}, D, N); // Projection matrix H
 
