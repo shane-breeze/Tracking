@@ -48,7 +48,7 @@ public class KFUpdator extends KernelLib{
 		Matrix.setInversionAlgorithm(new lowLatencyInvert());
 		Matrix RInv = R.matrix().inverse();
 
-		Matrix K = (Matrix) ((C * H.H(owner)) * RInv);
+		Matrix K = (Matrix) ((C * LinAlg.transpose(H.H(owner))) * RInv);
 		Matrix KH = (Matrix) (K * H.H(owner));
 
 		Matrix M = Matrix.identity(owner, dimension) - KH;

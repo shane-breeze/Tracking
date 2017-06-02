@@ -32,7 +32,7 @@ public class SingleUpdator extends CustomManager{
 		KernelBlock updator = addKernel(new single_updator(makeKernelParameters("KFUpdator")));
 
 		DFELink in = addStreamFromCPU("state_hit");
-		DFELink out = addStreamToCPU("state");
+		DFELink out = addStreamToCPU("state_up");
 
 		updator.getInput("state_hit") <== in;
 		out <== updator.getOutput("state_up");
@@ -56,18 +56,6 @@ public class SingleUpdator extends CustomManager{
 
         ei.setStream("state_hit", CPUTypes.FLOAT, (nState + nHit) * n);
         ei.setStream("state_up", CPUTypes.FLOAT, nState * n);
-        //ei.setStream("stateIn", CPUTypes.UINT64, 24 * nStubs);
-        ei.setStream("d0", CPUTypes.UINT64, 8 * n);
-        ei.setStream("d1", CPUTypes.UINT64, 8 * n);
-        ei.setStream("d2", CPUTypes.UINT64, 8 * n);
-        ei.setStream("d3", CPUTypes.UINT64, 8 * n);
-        ei.setStream("d4", CPUTypes.UINT64, 8 * n);
-        ei.setStream("stubIn", CPUTypes.UINT64, 8 * n);
-        ei.setStream("d0o", CPUTypes.UINT64, 8 * n);
-        ei.setStream("d1o", CPUTypes.UINT64, 8 * n);
-        ei.setStream("d2o", CPUTypes.UINT64, 8 * n);
-        ei.setStream("d3o", CPUTypes.UINT64, 8 * n);
-        ei.setStream("d4o", CPUTypes.UINT64, 8 * n);
         return ei;
     }
 

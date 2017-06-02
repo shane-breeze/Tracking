@@ -32,7 +32,14 @@ public class single_updator extends Kernel{
 		// Input the trajectory & hit
 		StructFieldType sftTrajectory = new StructFieldType("trajectoryState", TrajectoryState.ioType(T, N));
 		StructFieldType sftHit = new StructFieldType("hit", TrackingRecHit.ioType(T, D));
-		DFEStructType tIn = new DFEStructType(sftTrajectory, sftHit);
+		int nBits = TrajectoryState.ioType(T, N).getTotalBits() + TrackingRecHit.ioType(T, D).getTotalBits();
+		DFEStructType tIn;
+		if(nBits % 128 != 0){
+			StructFieldType sftPadding = new StructFieldType("padding", dfeRawBits(128 - (nBits % 128)));
+			tIn = new DFEStructType(sftTrajectory, sftHit, sftPadding);
+		}else{
+			tIn = new DFEStructType(sftTrajectory, sftHit);
+		}
 		DFEStruct inData = io.input("state_hit", tIn);
 
 		// Repackage the trajectory
