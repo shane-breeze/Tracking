@@ -49,20 +49,20 @@ build: maxfiles
 maxfiles: $(MAXFILES_MAX)
 
 #
-# MaxFile: DFEBDT
+# MaxFile: single_updator_sim
 #
 
 
-BUILDNAME_MAXFILE_1:=DFEBDT
-MAXFILE_1:=DFEBDT.max
+BUILDNAME_MAXFILE_1:=single_updator_sim
+MAXFILE_1:=single_updator_sim.max
 
-include/DFEBDT.h: maxfiles/DFEBDT.h
+include/single_updator_sim.h: maxfiles/single_updator_sim.h
 	cp $< $@
 
-maxfiles/DFEBDT.max maxfiles/DFEBDT.h:
+maxfiles/single_updator_sim.max maxfiles/single_updator_sim.h:
 # Ensure that maxfiles do not get build by this Makefile when running in MaxIDE
 ifndef MAXIDE_RUN
-	env  MAX_BUILDPARAMS=" DFEModel=MAIA  target=DFE_SIM  maxFileName=DFEBDT "  ant -v -f DFEBDT.xml
+	env  MAX_BUILDPARAMS=" DFEModel=MAIA  target=DFE_SIM  maxFileName=single_updator_sim "  ant -v -f single_updator_sim.xml
 else
 	test -f $@ || ( echo 'Maxfile unavailable: $@' >/dev/stderr ; exit 1 )
 endif
@@ -70,10 +70,10 @@ endif
 
 
 startsim:
-	'$(MAXCOMPILERDIR)/bin/maxcompilersim' -n tmttuscombsort -c MAIA -d 1  restart
+	'$(MAXCOMPILERDIR)/bin/maxcompilersim' -n TrackingSimula -c MAIA -d 1  restart
 
 stopsim:
-	'$(MAXCOMPILERDIR)/bin/maxcompilersim' -n tmttuscombsort -c MAIA -d 1  stop
+	'$(MAXCOMPILERDIR)/bin/maxcompilersim' -n TrackingSimula -c MAIA -d 1  stop
 
 clean: clean-dist clean-objects clean-installers
 distclean: clean clean-maxfiles

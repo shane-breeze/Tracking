@@ -1,0 +1,66 @@
+package kernel;
+
+import kalman.KFUpdator;
+import kalman.ProjectMatrix;
+import matrix.SymMatrix;
+import matrix.Vector;
+
+import com.maxeler.maxcompiler.v2.kernelcompiler.Kernel;
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelParameters;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFETypeFactory;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStruct;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStructType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStructType.StructFieldType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEVector;
+
+import formats.TrackingRecHit;
+import formats.TrajectoryState;
+
+public class single_updator extends Kernel{
+
+	public static DFEType T = DFETypeFactory.dfeFloat(8, 24);
+	public static int D = 2;
+	public static int N = 5;
+
+	public single_updator(KernelParameters params){
+		super(params);
+
+		ProjectMatrix pf = new ProjectMatrix(new int[]{3, 4}, D, N); // Projection matrix H
+
+		// Input the trajectory & hit
+		StructFieldType sftTrajectory = new StructFieldType("trajectoryState", TrajectoryState.ioType(T, N));
+		StructFieldType sftHit = new StructFieldType("hit", TrackingRecHit.ioType(T, D));
+		int nBits = TrajectoryState.ioType(T, N).getTotalBits() + TrackingRecHit.ioType(T, D).getTotalBits();
+		DFEStructType tIn;
+		if(nBits % 128 != 0){
+			StructFieldType sftPadding = new StructFieldType("padding", dfeRawBits(128 - (nBits % 128)));
+			tIn = new DFEStructType(sftTrajectory, sftHit, sftPadding);
+		}else{
+			tIn = new DFEStructType(sftTrajectory, sftHit);
+		}
+		DFEStruct inData = io.input("state_hit", tIn);
+
+		// Repackage the trajectory
+		DFEStruct tsData = (DFEStruct) inData.get("trajectoryState");
+		DFEVector<DFEVar> xData = (DFEVector<DFEVar>) tsData.get(TrajectoryState.label.X.label());
+		DFEVector<DFEVar> cData = (DFEVector<DFEVar>) tsData.get(TrajectoryState.label.C.label());;
+		Vector x = new Vector(xData);
+		SymMatrix<DFEVar> C = new SymMatrix<DFEVar>(this, cData.packToList());
+		TrajectoryState ts = new TrajectoryState(x, C);
+
+		//Repackage the hit
+		DFEStruct hitData = (DFEStruct) inData.get("hit");
+		TrackingRecHit hit = new TrackingRecHit(hitData);
+		KFUpdator updator = new KFUpdator(this);
+
+		// Do the update
+		TrajectoryState ts_up = updator.update(ts, hit, pf);
+
+		DFEStruct outData = ts_up.packForIO();
+		io.output("state_up", outData, ts_up.ioType());
+
+	}
+
+}

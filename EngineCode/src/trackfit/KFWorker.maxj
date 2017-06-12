@@ -19,7 +19,6 @@ import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEType;
 import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
 import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStruct;
 
-import division.Divider;
 import formats.Constants;
 import formats.State;
 
@@ -62,9 +61,9 @@ public abstract class KFWorker extends KernelLib{
 		//System.out.println("pdd: ");
 		//pdd.print();
 		// Take the inverse
-		Divider.setWatch(false);
-		Divider.setDSPPipelineFactor(0.5);
-		Divider.setLowLatency(true);
+		//Divider.setWatch(false);
+		//Divider.setDSPPipelineFactor(0.5);
+		//Divider.setLowLatency(true);
 		Matrix pddInv = pddInvOpt(pxx, stub);
 		System.out.println("pddInv: ");
 		pddInv.print();
@@ -134,14 +133,14 @@ public abstract class KFWorker extends KernelLib{
 		Hx.print();
 		optimization.popFixOpMode(MathOps.ALL);
 		optimization.pushFixOpMode(Optimization.bitSizeExact(18), Optimization.offsetExact(-9), MathOps.ALL);
-		Vector residual = (Vector) d.sub(Hx);
+		Vector residual = d.sub(Hx);
 		optimization.popFixOpMode(MathOps.ALL);
 		System.out.println("residual:");
 		residual.print();
 		Vector K_x_resid = (Vector) (K25b * residual);
 		System.out.println("K x residual:");
 		K_x_resid.print();
-		Vector xa = (Vector) x.add(K_x_resid);
+		Vector xa = x.add(K_x_resid);
 		System.out.println("xa:");
 		xa.print();
 		DFEVar[] xaTruncStruct = new DFEVar[4];
