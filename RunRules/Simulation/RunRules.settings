@@ -15,8 +15,8 @@
 <overrideEnableMPCX enabled="false" value="false"/>
 </maxFile>
 </maxFiles>
-<cpuCode targetType="executable">
-<libraryName/>
+<cpuCode targetType="shared">
+<libraryName>single_updator_sim</libraryName>
 <exeName>DefaultApplication</exeName>
 <skin>
 <ancillaryReleaseInformation enabled="false">
