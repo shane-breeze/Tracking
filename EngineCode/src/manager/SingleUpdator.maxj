@@ -54,7 +54,9 @@ public class SingleUpdator extends CustomManager{
         for(TrackingRecHit.label l : TrackingRecHit.label.values())
         	nHit += ((DFEVectorType<DFEVar>) tHit.getTypeForField(l.label())).getTotalBytes();
 
-        ei.setStream("state_hit", CPUTypes.FLOAT, (nState + nHit) * n);
+        int nTotal = nHit + nState;
+        nTotal += 16 - nTotal % 16;
+        ei.setStream("state_hit", CPUTypes.FLOAT, nTotal * n);
         ei.setStream("state_up", CPUTypes.FLOAT, nState * n);
         return ei;
     }
