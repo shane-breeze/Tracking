@@ -18,6 +18,7 @@ public class KFUpdator extends KernelLib{
 	Kernel owner;
 
 	private static class lowLatencyInvert implements Inverter{
+		@Override
 		public DFEVar invert(DFEVar x){
 			return division.Divider.reducedLUTDivideFloat(x, 11, 25);
 		}
@@ -33,7 +34,6 @@ public class KFUpdator extends KernelLib{
 
 		Vector x = state.vector();
 		Matrix C = state.matrix();
-
 		Vector r = hit.pos();
 		Vector rMeas = (Vector) (H.H(owner) * x);
 

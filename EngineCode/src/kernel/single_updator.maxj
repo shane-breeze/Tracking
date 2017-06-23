@@ -41,7 +41,7 @@ public class single_updator extends Kernel{
 			tIn = new DFEStructType(sftTrajectory, sftHit);
 		}
 		DFEStruct inData = io.input("state_hit", tIn);
-
+		inData.simWatch("in");
 		// Repackage the trajectory
 		DFEStruct tsData = (DFEStruct) inData.get("trajectoryState");
 		DFEVector<DFEVar> xData = (DFEVector<DFEVar>) tsData.get(TrajectoryState.label.X.label());
@@ -59,6 +59,7 @@ public class single_updator extends Kernel{
 		TrajectoryState ts_up = updator.update(ts, hit, pf);
 
 		DFEStruct outData = ts_up.packForIO();
+		outData.simWatch("out");
 		io.output("state_up", outData, ts_up.ioType());
 
 	}
