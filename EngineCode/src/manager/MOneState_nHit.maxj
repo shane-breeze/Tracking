@@ -1,12 +1,13 @@
 package manager;
 
 import kernel.KOneState_nHit;
-import kernel.single_updator;
+import misc.Misc;
 
 import com.maxeler.maxcompiler.v2.build.EngineParameters;
-import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFETypeFactory;
 import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStructType;
-import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEVectorType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStructType.StructFieldType;
 import com.maxeler.maxcompiler.v2.managers.custom.CustomManager;
 import com.maxeler.maxcompiler.v2.managers.custom.DFELink;
 import com.maxeler.maxcompiler.v2.managers.custom.blocks.KernelBlock;
@@ -34,33 +35,43 @@ public class MOneState_nHit extends CustomManager{
 
 		DFELink inHit = addStreamFromCPU("hit");
 		DFELink inState = addStreamFromCPU("state");
+		DFELink inStateControl = addStreamFromCPU("stateControl");
 		DFELink out = addStreamToCPU("state_up");
 
 		updator.getInput("hit") <== inHit;
 		updator.getInput("state") <== inState;
+		updator.getInput("nHits") <== inStateControl;
 		out <== updator.getOutput("state_up");
 	}
 
     private static EngineInterface interfaceDefault(){
         EngineInterface ei = new EngineInterface();
-        InterfaceParam n = ei.addParam("dataSize",CPUTypes.INT32); // Number of hits
+        InterfaceParam n = ei.addParam("nHits",CPUTypes.INT32); // Number of hits
         InterfaceParam m = ei.addParam("nStates", CPUTypes.INT32); // Number of states
-        //ei.setTicks("KFUpdator", n);
+        // Note: the state is wide enough for a PCIE transaction, but state control is not
+        // In principal nControls = m, but sometimes needs rounding up to next PCIE transaction size
+        InterfaceParam nControls = ei.addParam("nStateControls", CPUTypes.INT32); // Number of state controls
 
-        int nB = CPUTypes.FLOAT.sizeInBytes();
-        int nState = 0;
-        DFEStructType tState = TrajectoryState.ioType(single_updator.T, single_updator.N);
-        for(TrajectoryState.label l : TrajectoryState.label.values())
-        	nState += ((DFEVectorType<DFEVar>) tState.getTypeForField(l.label())).getTotalBytes();
+        DFEType T = DFETypeFactory.dfeFloat(8, 24);
 
-        int nHit = 0;
-        DFEStructType tHit = TrackingRecHit.ioType(single_updator.T, single_updator.D);
-        for(TrackingRecHit.label l : TrackingRecHit.label.values())
-        	nHit += ((DFEVectorType<DFEVar>) tHit.getTypeForField(l.label())).getTotalBytes();
+		StructFieldType sftTrajectory = new StructFieldType("trajectoryState", TrajectoryState.ioType(T, 5));
+		StructFieldType sftEOF = new StructFieldType("EOF", T);
+		DFEStructType tTrajectory = Misc.addPCIEPadding(new StructFieldType[]{sftTrajectory, sftEOF}).data();
+		int nStateIn = tTrajectory.getTotalBytes();
 
-        ei.setStream("state", CPUTypes.FLOAT, nState * m);
+		int nStateOut = TrajectoryState.ioType(T, 5).getTotalBytes();
+
+		StructFieldType sftHit = new StructFieldType("hit", TrackingRecHit.ioType(T, 2));
+		DFEStructType tHit = Misc.addPCIEPadding(new StructFieldType[]{sftHit}).data();
+		int nHit = tHit.getTotalBytes();
+
+		ei.setTicks("KFUpdator", n);
+        ei.setStream("state", CPUTypes.FLOAT, nStateIn * m);
+        ei.setStream("nHits", CPUTypes.UINT32, CPUTypes.UINT32.sizeInBytes() * nControls);
         ei.setStream("hit", CPUTypes.FLOAT, nHit * n);
-        ei.setStream("state_up", CPUTypes.FLOAT, nState * n);
+        ei.setStream("state_up", CPUTypes.FLOAT, nStateOut * n);
+        ei.setScalar("KFUpdator", "nStates", m);
+        ei.setScalar("KFUpdator", "nStateRepeats", nControls);
         return ei;
     }
 }

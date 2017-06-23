@@ -4,12 +4,14 @@ import kalman.KFUpdator;
 import kalman.ProjectMatrix;
 import matrix.SymMatrix;
 import matrix.Vector;
+import maxpower.kernel.io.ZeroLatencyInput;
 import misc.Misc;
 
 import com.maxeler.maxcompiler.v2.kernelcompiler.Kernel;
 import com.maxeler.maxcompiler.v2.kernelcompiler.KernelParameters;
 import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.Reductions;
-import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.IO.NonBlockingInput;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.Count.Counter;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.Count.Params;
 import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEType;
 import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFETypeFactory;
 import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
@@ -29,7 +31,6 @@ public class KOneState_nHit extends Kernel{
 
 	public KOneState_nHit(KernelParameters params){
 		super(params);
-		flush.disabled();
 		ProjectMatrix pf = new ProjectMatrix(new int[]{3, 4}, D, N); // Projection matrix H
 
 		// Input the hit
@@ -37,13 +38,30 @@ public class KOneState_nHit extends Kernel{
 		DFEStructType tHit = Misc.addPCIEPadding(new StructFieldType[]{sftHit}).data();
 		DFEStruct inHitData = io.input("hit", tHit);
 
-		// Input the trajectory. Use a non blocking input and streamHold to present one state to many hits
+		// Make a type for the trajectory
 		StructFieldType sftTrajectory = new StructFieldType("trajectoryState", TrajectoryState.ioType(T, N));
-		StructFieldType sftEOF = new StructFieldType("EOF", T);
+		StructFieldType sftEOF = new StructFieldType("nextPosition", T);
 		DFEStructType tTrajectory = Misc.addPCIEPadding(new StructFieldType[]{sftTrajectory, sftEOF}).data();
+
 		// Set the EOF field to any negative (floating point) number to trigger EOF
-		NonBlockingInput<DFEStruct> ioTrajectory = io.nonBlockingInput("state", tTrajectory, TrajectoryState.ioType(T, N).getTotalBits() + 1);
-		DFEStruct inTrajectoryData = Reductions.streamHold(ioTrajectory.data, ioTrajectory.valid);
+		DFEVar iStateEnable = dfeBool().newInstance(this);
+
+		DFEVar nStates = io.scalarInput("nStates", dfeUInt(32));
+		DFEVar nStateRepeats = io.scalarInput("nStateRepeats", dfeUInt(32));
+		// Input the trajectory with zero latency so we can control reading based on another input
+		DFEStruct inTrajectoryData = ZeroLatencyInput.input("state", tTrajectory, iStateEnable, nStates);
+
+		// Input the state repeat: the number of hits to filter with this state
+		DFEVar stateRepeat = ZeroLatencyInput.input("nHits", dfeUInt(32), iStateEnable, nStateRepeats);
+		//DFEVar nHitsPerState = io.input("hitPosition", dfeUInt(32), iStateEnable);
+		//DFEStruct inTrajectoryData = io.input("state", tTrajectory, iStateEnable);
+
+		Params countParams = control.count.makeParams(32).withMax(stateRepeat);
+		Counter runCycleCount = control.count.makeCounter(countParams);
+
+		iStateEnable <== stream.offset(Reductions.streamHold(runCycleCount.getWrap(), constant.var(true), dfeBool().encodeConstant(true)), -1);
+		//NonBlockingInput<DFEStruct> ioTrajectory = io.nonBlockingInput("state", tTrajectory, TrajectoryState.ioType(T, N).getTotalBits() + 1);
+		//DFEStruct inTrajectoryData = Reductions.streamHold(ioTrajectory.data, ioTrajectory.valid);
 
 		// Repackage the trajectory
 		DFEStruct tsData = (DFEStruct) inTrajectoryData.get("trajectoryState");
@@ -58,6 +76,9 @@ public class KOneState_nHit extends Kernel{
 		TrackingRecHit hit = new TrackingRecHit(hitData);
 		KFUpdator updator = new KFUpdator(this);
 
+		xData.simWatch("X");
+		cData.simWatch("C");
+		inHitData.simWatch("hit");
 		// Do the update
 		TrajectoryState ts_up = updator.update(ts, hit, pf);
 
