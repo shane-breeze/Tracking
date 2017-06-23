@@ -1,0 +1,66 @@
+package manager;
+
+import kernel.KOneState_nHit;
+import kernel.single_updator;
+
+import com.maxeler.maxcompiler.v2.build.EngineParameters;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStructType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEVectorType;
+import com.maxeler.maxcompiler.v2.managers.custom.CustomManager;
+import com.maxeler.maxcompiler.v2.managers.custom.DFELink;
+import com.maxeler.maxcompiler.v2.managers.custom.blocks.KernelBlock;
+import com.maxeler.maxcompiler.v2.managers.engine_interfaces.CPUTypes;
+import com.maxeler.maxcompiler.v2.managers.engine_interfaces.EngineInterface;
+import com.maxeler.maxcompiler.v2.managers.engine_interfaces.InterfaceParam;
+
+import formats.TrackingRecHit;
+import formats.TrajectoryState;
+
+public class MOneState_nHit extends CustomManager{
+
+	public static void main(String[] args){
+		EngineParameters params = new EngineParameters();
+		MOneState_nHit m = new MOneState_nHit(params);
+		m.createSLiCinterface(interfaceDefault());
+		m.build();
+	}
+
+	public MOneState_nHit(EngineParameters params){
+		super(params);
+
+		this.getCurrentKernelConfig().debug.setEnableLatencyAnnotation(true);
+		KernelBlock updator = addKernel(new KOneState_nHit(makeKernelParameters("KFUpdator")));
+
+		DFELink inHit = addStreamFromCPU("hit");
+		DFELink inState = addStreamFromCPU("state");
+		DFELink out = addStreamToCPU("state_up");
+
+		updator.getInput("hit") <== inHit;
+		updator.getInput("state") <== inState;
+		out <== updator.getOutput("state_up");
+	}
+
+    private static EngineInterface interfaceDefault(){
+        EngineInterface ei = new EngineInterface();
+        InterfaceParam n = ei.addParam("dataSize",CPUTypes.INT32); // Number of hits
+        InterfaceParam m = ei.addParam("nStates", CPUTypes.INT32); // Number of states
+        //ei.setTicks("KFUpdator", n);
+
+        int nB = CPUTypes.FLOAT.sizeInBytes();
+        int nState = 0;
+        DFEStructType tState = TrajectoryState.ioType(single_updator.T, single_updator.N);
+        for(TrajectoryState.label l : TrajectoryState.label.values())
+        	nState += ((DFEVectorType<DFEVar>) tState.getTypeForField(l.label())).getTotalBytes();
+
+        int nHit = 0;
+        DFEStructType tHit = TrackingRecHit.ioType(single_updator.T, single_updator.D);
+        for(TrackingRecHit.label l : TrackingRecHit.label.values())
+        	nHit += ((DFEVectorType<DFEVar>) tHit.getTypeForField(l.label())).getTotalBytes();
+
+        ei.setStream("state", CPUTypes.FLOAT, nState * m);
+        ei.setStream("hit", CPUTypes.FLOAT, nHit * n);
+        ei.setStream("state_up", CPUTypes.FLOAT, nState * n);
+        return ei;
+    }
+}

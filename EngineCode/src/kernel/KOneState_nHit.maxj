@@ -1,0 +1,67 @@
+package kernel;
+
+import kalman.KFUpdator;
+import kalman.ProjectMatrix;
+import matrix.SymMatrix;
+import matrix.Vector;
+import misc.Misc;
+
+import com.maxeler.maxcompiler.v2.kernelcompiler.Kernel;
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelParameters;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.Reductions;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.IO.NonBlockingInput;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFETypeFactory;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStruct;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStructType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStructType.StructFieldType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEVector;
+
+import formats.TrackingRecHit;
+import formats.TrajectoryState;
+
+public class KOneState_nHit extends Kernel{
+
+	public static DFEType T = DFETypeFactory.dfeFloat(8, 24);
+	public static int D = 2;
+	public static int N = 5;
+
+	public KOneState_nHit(KernelParameters params){
+		super(params);
+		flush.disabled();
+		ProjectMatrix pf = new ProjectMatrix(new int[]{3, 4}, D, N); // Projection matrix H
+
+		// Input the hit
+		StructFieldType sftHit = new StructFieldType("hit", TrackingRecHit.ioType(T, D));
+		DFEStructType tHit = Misc.addPCIEPadding(new StructFieldType[]{sftHit}).data();
+		DFEStruct inHitData = io.input("hit", tHit);
+
+		// Input the trajectory. Use a non blocking input and streamHold to present one state to many hits
+		StructFieldType sftTrajectory = new StructFieldType("trajectoryState", TrajectoryState.ioType(T, N));
+		StructFieldType sftEOF = new StructFieldType("EOF", T);
+		DFEStructType tTrajectory = Misc.addPCIEPadding(new StructFieldType[]{sftTrajectory, sftEOF}).data();
+		// Set the EOF field to any negative (floating point) number to trigger EOF
+		NonBlockingInput<DFEStruct> ioTrajectory = io.nonBlockingInput("state", tTrajectory, TrajectoryState.ioType(T, N).getTotalBits() + 1);
+		DFEStruct inTrajectoryData = Reductions.streamHold(ioTrajectory.data, ioTrajectory.valid);
+
+		// Repackage the trajectory
+		DFEStruct tsData = (DFEStruct) inTrajectoryData.get("trajectoryState");
+		DFEVector<DFEVar> xData = (DFEVector<DFEVar>) tsData.get(TrajectoryState.label.X.label());
+		DFEVector<DFEVar> cData = (DFEVector<DFEVar>) tsData.get(TrajectoryState.label.C.label());;
+		Vector x = new Vector(xData);
+		SymMatrix<DFEVar> C = new SymMatrix<DFEVar>(this, cData.packToList());
+		TrajectoryState ts = new TrajectoryState(x, C);
+
+		//Repackage the hit
+		DFEStruct hitData = (DFEStruct) inHitData.get("hit");
+		TrackingRecHit hit = new TrackingRecHit(hitData);
+		KFUpdator updator = new KFUpdator(this);
+
+		// Do the update
+		TrajectoryState ts_up = updator.update(ts, hit, pf);
+
+		DFEStruct outData = ts_up.packForIO();
+		io.output("state_up", outData, ts_up.ioType());
+	}
+}
