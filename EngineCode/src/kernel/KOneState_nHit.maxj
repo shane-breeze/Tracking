@@ -4,7 +4,6 @@ import kalman.KFUpdator;
 import kalman.ProjectMatrix;
 import matrix.SymMatrix;
 import matrix.Vector;
-import maxpower.kernel.io.ZeroLatencyInput;
 import misc.Misc;
 
 import com.maxeler.maxcompiler.v2.kernelcompiler.Kernel;
@@ -12,6 +11,7 @@ import com.maxeler.maxcompiler.v2.kernelcompiler.KernelParameters;
 import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.Reductions;
 import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.Count.Counter;
 import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.Count.Params;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.memory.Queue;
 import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEType;
 import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFETypeFactory;
 import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
@@ -40,31 +40,68 @@ public class KOneState_nHit extends Kernel{
 
 		// Make a type for the trajectory
 		StructFieldType sftTrajectory = new StructFieldType("trajectoryState", TrajectoryState.ioType(T, N));
-		StructFieldType sftEOF = new StructFieldType("nextPosition", T);
-		DFEStructType tTrajectory = Misc.addPCIEPadding(new StructFieldType[]{sftTrajectory, sftEOF}).data();
+		//StructFieldType sftEOF = new StructFieldType("nextPosition", T);
+		DFEStructType tTrajectory = Misc.addPCIEPadding(new StructFieldType[]{sftTrajectory}).data();
 
-		// Set the EOF field to any negative (floating point) number to trigger EOF
-		DFEVar iStateEnable = dfeBool().newInstance(this);
+		// Counter for number of hits read for current state
+		DFEVar nHitsPerState = dfeUInt(32).newInstance(this);
+		Params countParams = control.count.makeParams(32).withMax(nHitsPerState);
+		Counter hitCount = control.count.makeCounter(countParams);
 
-		DFEVar nStates = io.scalarInput("nStates", dfeUInt(32));
-		DFEVar nStateRepeats = io.scalarInput("nStateRepeats", dfeUInt(32));
-		// Input the trajectory with zero latency so we can control reading based on another input
-		DFEStruct inTrajectoryData = ZeroLatencyInput.input("state", tTrajectory, iStateEnable, nStates);
+		// Run cycle counter
+		Counter runCycleCounter = control.count.makeCounter(control.count.makeParams(16));
+		DFEVar clkCount = runCycleCounter.getCount();
 
+		// Counter for the number of counter wrap signals
+		// Need to ignore the first 'ioLatency' input reads, since this many are already buffered
+		int iLatency = 6;
+		Counter nReadsCounter = control.count.makeCounter(control.count.makeParams(16).withEnable(hitCount.getWrap()));
+
+		DFEVar preIOLatency = clkCount < iLatency;//io.getInputNode("nHits").getLatency();
+		//DFEVar iStateEnable = preLoopLatency ? constant.var(true) :
+		//DFEVar iStateWEnable = clkCount === 1;
+		optimization.pushNoPipelining();
+		DFEVar iStateWEnableHold = (hitCount.getWrap() & (nReadsCounter.getCount() >= iLatency)) | preIOLatency;
+		optimization.popNoPipelining();
+
+		DFEVar iStateWEnable = Reductions.streamHold(iStateWEnableHold, constant.var(true), dfeBool().encodeConstant(true));
+		debug.simPrintf("iStateWEnable: %d", iStateWEnable);
+		//DFEVar iStateWEnable = clkCount === 1;
+		//iStateWEnable = iStateWEnable.unscheduled();
+
+		DFEVar iStateREnable = Reductions.streamHold(hitCount.getWrap(), constant.var(true), dfeBool().encodeConstant(true));
+		iStateREnable = iStateREnable.unscheduled();
+		// Input the state
+		DFEStruct inTrajectoryData = io.input("state", tTrajectory, stream.offset(iStateWEnable, -7, dfeBool().encodeConstant(true)));
 		// Input the state repeat: the number of hits to filter with this state
-		DFEVar stateRepeat = ZeroLatencyInput.input("nHits", dfeUInt(32), iStateEnable, nStateRepeats);
-		//DFEVar nHitsPerState = io.input("hitPosition", dfeUInt(32), iStateEnable);
-		//DFEStruct inTrajectoryData = io.input("state", tTrajectory, iStateEnable);
+		//DFEVar nHits = io.input("nHits", dfeUInt(32), iStateEnable);
+		DFEVar inNHitsPerState = io.input("nHits", dfeUInt(32), stream.offset(iStateWEnable, -7, dfeBool().encodeConstant(true)));
 
-		Params countParams = control.count.makeParams(32).withMax(stateRepeat);
-		Counter runCycleCount = control.count.makeCounter(countParams);
+		// Put the state and nHits into a FIFO, for the processing latency of the io logic
+		StructFieldType sftNHits = new StructFieldType("nHits", dfeUInt(32));
+		DFEStructType tQData = new DFEStructType(sftTrajectory, sftNHits);
+		DFEStruct qiData = tQData.newInstance(this);
+		//DFEStruct qiData = TrajectoryState.ioType(T, N).newInstance(this);
+		qiData.get("trajectoryState") <== inTrajectoryData.get("trajectoryState");
+		qiData.get("nHits") <== inNHitsPerState;
 
-		iStateEnable <== stream.offset(Reductions.streamHold(runCycleCount.getWrap(), constant.var(true), dfeBool().encodeConstant(true)), -1);
+		int lStateInput = io.getInputNode("state").getLatency();
+		Queue<DFEStruct> iQueue = mem.queue(tQData, 32);
+
+		iQueue.insert(stream.offset(qiData, -2), stream.offset(iStateWEnable, -4));
+		DFEStruct qoData = iQueue.remove(iStateREnable);//stream.offset(iStateREnable, -4));
+		nHitsPerState <== (DFEVar) qoData.get("nHits");
+		//Params countParams = control.count.makeParams(32).withMax(nHitsPerState);
+		//runCycleCount = control.count.makeCounter(countParams);
+
+		//iStateEnable <== stream.offset(Reductions.streamHold(runCycleCount.getWrap(), constant.var(true), dfeBool().encodeConstant(true)), -1);
+		//iStateEnable = iStateEnable.unscheduled(); // I think
+
 		//NonBlockingInput<DFEStruct> ioTrajectory = io.nonBlockingInput("state", tTrajectory, TrajectoryState.ioType(T, N).getTotalBits() + 1);
 		//DFEStruct inTrajectoryData = Reductions.streamHold(ioTrajectory.data, ioTrajectory.valid);
 
 		// Repackage the trajectory
-		DFEStruct tsData = (DFEStruct) inTrajectoryData.get("trajectoryState");
+		DFEStruct tsData = qoData.get("trajectoryState");//(DFEStruct) inTrajectoryData.get("trajectoryState");
 		DFEVector<DFEVar> xData = (DFEVector<DFEVar>) tsData.get(TrajectoryState.label.X.label());
 		DFEVector<DFEVar> cData = (DFEVector<DFEVar>) tsData.get(TrajectoryState.label.C.label());;
 		Vector x = new Vector(xData);
@@ -76,13 +113,21 @@ public class KOneState_nHit extends Kernel{
 		TrackingRecHit hit = new TrackingRecHit(hitData);
 		KFUpdator updator = new KFUpdator(this);
 
-		xData.simWatch("X");
-		cData.simWatch("C");
-		inHitData.simWatch("hit");
 		// Do the update
 		TrajectoryState ts_up = updator.update(ts, hit, pf);
 
 		DFEStruct outData = ts_up.packForIO();
 		io.output("state_up", outData, ts_up.ioType());
+
+		((DFEStruct) inTrajectoryData.get("trajectoryState")).get(TrajectoryState.label.X.label()).simWatch("X_in");
+		xData.simWatch("X_QO");
+		//cData.simWatch("C");
+		hit.pos().watch("hit_pos");
+		nHitsPerState.simWatch("nHitsPerState_QO");
+		hitCount.getCount().simWatch("hitCount");
+		iStateWEnable.simWatch("iStateWEnable");
+		iStateREnable.simWatch("iStateREnable");
+		stream.offset(iStateREnable, -4).simWatch("iStateREnable_off4");
+		iQueue.valid().simWatch("Q_valid");
 	}
 }

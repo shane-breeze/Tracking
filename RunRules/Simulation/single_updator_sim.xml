@@ -12,6 +12,33 @@
     <condition property="EnvClassPath" value="${env.CLASSPATH}">
         <isset property="env.CLASSPATH"/>
     </condition>
+    <condition property="maxcompilernetdirpath" value="${env.MAXCOMPILERNETDIR}/lib/MaxCompilerNet.jar">
+        <isset property="env.MAXCOMPILERNETDIR"/>
+    </condition>
+    <path id="maxclasspath">
+        <pathelement path="${env.ANT_MAXELER_INTERNAL_MAXIDE_JARS}"/>
+        <pathelement path="../RunRules/Simulation/dist/bin"/>
+        <pathelement path="${maxcompilerdirpath}"/>
+        <pathelement path="../../maxpower/bin"/>
+        <pathelement path="/home/Maxeler/lib/MaxIDE/plugins/org.junit_4.8.1.v4_8_1_v20100427-1100/junit.jar"/>
+        <pathelement path="/home/Maxeler/lib/MaxIDE/plugins/org.hamcrest.core_1.1.0.v20090501071000.jar"/>
+        <pathelement path="../../Lib/EngineCode/bin"/>
+        <pathelement path="${EnvClassPath}"/>
+    </path>
+    <path id="maxnetclasspath">
+        <pathelement path="${maxcompilernetdirpath}"/>
+        <path refid="maxclasspath"/>
+    </path>
+    <property name="maxclasspath" refid="maxclasspath"/>
+    <property name="maxnetclasspath" refid="maxnetclasspath"/>
+    <condition property="finalclasspath" value="${maxnetclasspath}">
+        <isset property="maxcompilernetdirpath"/>
+    </condition>
+    <condition property="finalclasspath" value="${maxclasspath}">
+        <not>
+            <isset property="finalclasspath"/>
+        </not>
+    </condition>
     <target name="all" depends="runresult"/>
     <target name="build">
         <ant inheritAll="false" antfile="../RunRules/Simulation/single_updator_sim_Build.xml"/>
@@ -23,16 +50,11 @@
             </not>
         </condition>
         <java classname="manager.SingleUpdator" fork="true" failonerror="false" resultproperty="java.result">
-            <env key="MAXSOURCEDIRS" value="src"/>
+            <env key="MAXSOURCEDIRS" value="src:test"/>
             <jvmarg value="-Xmx2048m"/>
             <arg line="${args}"/>
             <classpath>
-                <pathelement path="${env.ANT_MAXELER_INTERNAL_MAXIDE_JARS}"/>
-                <pathelement path="../RunRules/Simulation/dist/bin"/>
-                <pathelement path="../../Lib/EngineCode/bin"/>
-                <pathelement path="../../maxpower/bin"/>
-                <pathelement path="${maxcompilerdirpath}"/>
-                <pathelement path="${EnvClassPath}"/>
+                <pathelement path="${finalclasspath}"/>
             </classpath>
         </java>
         <exec executable="${env.MAXCOMPILERDIR}/lib/MaxIDE/copyBuildResults.sh" newenvironment="false" dir="../RunRules/Simulation">

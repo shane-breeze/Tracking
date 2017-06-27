@@ -20,7 +20,7 @@ extern "C" {
  * \brief Basic static function for the interface 'default'.
  * 
  * \param [in] param_dataSize Interface Parameter "dataSize".
- * \param [in] instream_state_hit The stream should be of size (param_dataSize * 112) bytes.
+ * \param [in] instream_state_hit The stream should be of size (param_dataSize * 100) bytes.
  * \param [out] outstream_state_up The stream should be of size (param_dataSize * 80) bytes.
  */
 void single_updator_sim(
@@ -37,7 +37,7 @@ void single_updator_sim(
  * 
  * 
  * \param [in] param_dataSize Interface Parameter "dataSize".
- * \param [in] instream_state_hit The stream should be of size (param_dataSize * 112) bytes.
+ * \param [in] instream_state_hit The stream should be of size (param_dataSize * 100) bytes.
  * \param [out] outstream_state_up The stream should be of size (param_dataSize * 80) bytes.
  * \return A handle on the execution status, or NULL in case of error.
  */
@@ -52,7 +52,7 @@ max_run_t *single_updator_sim_nonblock(
  */
 typedef struct { 
 	int32_t param_dataSize; /**<  [in] Interface Parameter "dataSize". */
-	const float *instream_state_hit; /**<  [in] The stream should be of size (param_dataSize * 112) bytes. */
+	const float *instream_state_hit; /**<  [in] The stream should be of size (param_dataSize * 100) bytes. */
 	float *outstream_state_up; /**<  [out] The stream should be of size (param_dataSize * 80) bytes. */
 } single_updator_sim_actions_t;
 

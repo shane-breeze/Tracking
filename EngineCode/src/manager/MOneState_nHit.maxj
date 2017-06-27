@@ -35,7 +35,7 @@ public class MOneState_nHit extends CustomManager{
 
 		DFELink inHit = addStreamFromCPU("hit");
 		DFELink inState = addStreamFromCPU("state");
-		DFELink inStateControl = addStreamFromCPU("stateControl");
+		DFELink inStateControl = addStreamFromCPU("nHits");
 		DFELink out = addStreamToCPU("state_up");
 
 		updator.getInput("hit") <== inHit;
@@ -55,8 +55,8 @@ public class MOneState_nHit extends CustomManager{
         DFEType T = DFETypeFactory.dfeFloat(8, 24);
 
 		StructFieldType sftTrajectory = new StructFieldType("trajectoryState", TrajectoryState.ioType(T, 5));
-		StructFieldType sftEOF = new StructFieldType("EOF", T);
-		DFEStructType tTrajectory = Misc.addPCIEPadding(new StructFieldType[]{sftTrajectory, sftEOF}).data();
+		//StructFieldType sftEOF = new StructFieldType("EOF", T);
+		DFEStructType tTrajectory = Misc.addPCIEPadding(new StructFieldType[]{sftTrajectory}).data();
 		int nStateIn = tTrajectory.getTotalBytes();
 
 		int nStateOut = TrajectoryState.ioType(T, 5).getTotalBytes();
@@ -70,8 +70,6 @@ public class MOneState_nHit extends CustomManager{
         ei.setStream("nHits", CPUTypes.UINT32, CPUTypes.UINT32.sizeInBytes() * nControls);
         ei.setStream("hit", CPUTypes.FLOAT, nHit * n);
         ei.setStream("state_up", CPUTypes.FLOAT, nStateOut * n);
-        ei.setScalar("KFUpdator", "nStates", m);
-        ei.setScalar("KFUpdator", "nStateRepeats", nControls);
         return ei;
     }
 }
