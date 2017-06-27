@@ -30,7 +30,7 @@ public class MOneState_nHit extends CustomManager{
 	public MOneState_nHit(EngineParameters params){
 		super(params);
 
-		this.getCurrentKernelConfig().debug.setEnableLatencyAnnotation(true);
+		//this.getCurrentKernelConfig().debug.setEnableLatencyAnnotation(true);
 		KernelBlock updator = addKernel(new KOneState_nHit(makeKernelParameters("KFUpdator")));
 
 		DFELink inHit = addStreamFromCPU("hit");
