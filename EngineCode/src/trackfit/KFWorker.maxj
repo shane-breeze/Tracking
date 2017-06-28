@@ -184,11 +184,10 @@ public abstract class KFWorker extends KernelLib{
 		DFEVar cBinFloor = KernelMath.floor(cBin).cast(State.metadata.CBIN_HT.type());
 		int cBinMinVal = (int) - Math.pow(2, State.metadata.CBIN_HT.type().getTotalBits() - 1);
 		int cBinMaxVal = (int) Math.pow(2,State.metadata.CBIN_HT.type().getTotalBits() - 1);
-		int cBinFloorMaxVal = cBinMaxVal - 1;
 		DFEVar cBinTooLow = cBin < cBinMinVal;
 		DFEVar cBinTooHigh = cBin >= cBinMaxVal;
 		DFEVar cBinBoundedL = cBinTooLow ? cBinMinVal : cBinFloor;
-		DFEVar cBinBoundedH = cBinTooHigh > cBinFloorMaxVal ? cBinMaxVal : cBinFloor;
+		DFEVar cBinBoundedH = cBinTooHigh ? cBinMaxVal : cBinFloor;
 		DFEVar cBinBounded = cBin < 0 ? cBinBoundedL : cBinBoundedH;
 		DFEVar cBinCompatible = cBinBounded === stateIn.metadata(State.metadata.CBIN_HT.name());
 
@@ -197,11 +196,10 @@ public abstract class KFWorker extends KernelLib{
 		DFEVar mBinFloor = KernelMath.floor(mBin).cast(State.metadata.MBIN_HT.type());
 		int mBinMinVal = (int) - Math.pow(2, State.metadata.MBIN_HT.type().getTotalBits() - 1);
 		int mBinMaxVal = (int) Math.pow(2, State.metadata.MBIN_HT.type().getTotalBits() - 1);
-		int mBinFloorMaxVal = mBinMaxVal - 1;
 		DFEVar mBinTooLow = mBin < mBinMinVal;
 		DFEVar mBinTooHigh = mBin >= mBinMaxVal;
 		DFEVar mBoundedL = mBinTooLow ? mBinMinVal : mBinFloor;
-		DFEVar mBoundedH = mBinTooHigh > mBinFloorMaxVal ? mBinMaxVal : mBinFloor;
+		DFEVar mBoundedH = mBinTooHigh ? mBinMaxVal : mBinFloor;
 		DFEVar mBinBounded = mBin < 0 ? mBoundedL : mBoundedH;
 		DFEVar mBinCompatible = mBinBounded === stateIn.metadata(State.metadata.MBIN_HT.name());
 

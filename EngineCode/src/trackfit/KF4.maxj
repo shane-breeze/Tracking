@@ -294,10 +294,10 @@ public class KF4 extends KFWorker{
 		/*System.out.println("pdd00 " + numerator0);
 		System.out.println("pdd00_trunk " + numerator0Trunc);*/
 		//div0.setSimWatch("pdd00");
-		Divider.setWatch(true);
+		//Divider.setWatch(true);
 		Divider div = new Divider(this.getKernel());
 		DFEVar denominator0 = div.reducedLUTDivideIgnore(numerator0Trunc, 11, 13, 35, 35, 6).cast(dfeRawBits(nPdd00InvIntBits + nPdd00InvFracBits)).cast(tPdd00Inv);
-		Divider.setWatch(false);
+		//Divider.setWatch(false);
 		//DFEVar denominator0 = Divider.divInt18_1BRAM_2DSP(numerator0Trunc).cast(dfeRawBits(nPdd00InvIntBits + nPdd00InvFracBits)).cast(tPdd00Inv);
 		//optimization.pushFixOpMode(Optimization.bitSizeExact(nPdd00InvIntBits + nPdd00InvFracBits), Optimization.offsetExact(-nPdd00InvFracBits), MathOps.DIV);
 		//DFEVar denominator0 = 1 / numerator0Trunc;
