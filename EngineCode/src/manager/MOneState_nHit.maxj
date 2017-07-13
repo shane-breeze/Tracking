@@ -69,7 +69,7 @@ public class MOneState_nHit extends CustomManager{
         ei.setStream("state", CPUTypes.FLOAT, nStateIn * m);
         ei.setStream("nHits", CPUTypes.UINT32, CPUTypes.UINT32.sizeInBytes() * nControls);
         ei.setStream("hit", CPUTypes.FLOAT, nHit * n);
-        ei.setStream("state_up", CPUTypes.FLOAT, nStateOut * KOneState_nHit.maxStates);
+        ei.setStream("state_up", CPUTypes.FLOAT, nStateOut * n);
         ei.setScalar("KFUpdator", "nHits_ZLI_inputLength", nControls);
         ei.setScalar("KFUpdator", "state_ZLI_inputLength", m);
         ei.setScalar("KFUpdator", "nHitsTotal", n);

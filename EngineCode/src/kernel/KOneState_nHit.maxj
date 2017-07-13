@@ -87,8 +87,8 @@ public class KOneState_nHit extends Kernel{
 		// Do the update
 		TrajectoryState ts_up = updator.update(ts, hit, pf);
 
-		// Idea for how to accumulate N best of using Reductions streamMinWithMetadata
-		DFEVar comparisonValue = hit.chiSquared() + lostHitPenalty * hit.lostHits(); // TODO implement all of these
+    // Accumulate the best states according by (chi^2 + lost_hits * lost_hit_penalty)
+		/*DFEVar comparisonValue = hit.chiSquared() + lostHitPenalty * hit.lostHits(); // TODO implement all of these
 		List<Reductions.ReducedStreamInfo<DFEStruct>> bestStateReductions = (new BestOfStreamWithMetadata<DFEStruct>(this, BestOfStream.Mode.MIN, maxStates, comparisonValue, ts_up.packForIO())).best();
 		List<DFEStruct> bestStates = new ArrayList<DFEStruct>();
 		for(Reductions.ReducedStreamInfo<DFEStruct> stateReduction : bestStateReductions){
@@ -98,7 +98,9 @@ public class KOneState_nHit extends Kernel{
 		DFEVar readOutEnable = runCycleCount >= nHitsTotal;
 		Counter readOutSelect = control.count.makeCounter(control.count.makeParams(3).withEnable(readOutEnable).withMax(maxStates));
 
-		DFEStruct outData = control.mux(readOutSelect.getCount(), bestStates);
+		DFEStruct outData = control.mux(readOutSelect.getCount(), bestStates);*/
+    DFEStruct outData = ts_up.packForIO();
+    DFEVar readOutEnable = constant.var(true);
 
 		io.output("state_up", outData, ts_up.ioType(), readOutEnable);
 
