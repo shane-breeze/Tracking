@@ -1,11 +1,16 @@
 package kernel;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import kalman.KFUpdator;
 import kalman.ProjectMatrix;
 import matrix.SymMatrix;
 import matrix.Vector;
 import maxpower.kernel.io.ZeroLatencyInput;
 import misc.Misc;
+import sort.BestOfStream;
+import sort.BestOfStreamWithMetadata;
 
 import com.maxeler.maxcompiler.v2.kernelcompiler.Kernel;
 import com.maxeler.maxcompiler.v2.kernelcompiler.KernelParameters;
@@ -28,6 +33,8 @@ public class KOneState_nHit extends Kernel{
 	public static DFEType T = DFETypeFactory.dfeFloat(8, 24);
 	public static int D = 2;
 	public static int N = 5;
+	public static int maxStates = 5;
+	public static double lostHitPenalty = 1.;
 
 	public KOneState_nHit(KernelParameters params){
 		super(params);
@@ -37,12 +44,11 @@ public class KOneState_nHit extends Kernel{
 		StructFieldType sftHit = new StructFieldType("hit", TrackingRecHit.ioType(T, D));
 		DFEStructType tHit = Misc.addPCIEPadding(new StructFieldType[]{sftHit}).data();
 		DFEStruct inHitData = io.input("hit", tHit);
+		DFEVar nHitsTotal = io.scalarInput("nHitsTotal", dfeUInt(32));
 
 		// Make a type for the trajectory
 		StructFieldType sftTrajectory = new StructFieldType("trajectoryState", TrajectoryState.ioType(T, N));
-		//StructFieldType sftEOF = new StructFieldType("nextPosition", T);
 		DFEStructType tTrajectory = Misc.addPCIEPadding(new StructFieldType[]{sftTrajectory}).data();
-
 
 		/*
 		 * We need to streamHold the enable signal (then negative offset) as the scheduler
@@ -54,6 +60,11 @@ public class KOneState_nHit extends Kernel{
 		DFEStruct iState = ZeroLatencyInput.input("state", tTrajectory, _iEnable);
 		DFEVar iNHitsPerState = ZeroLatencyInput.input("nHits", dfeUInt(32), _iEnable);
 
+		// Global tick counter
+		Counter runCycleCounter = control.count.makeCounter(control.count.makeParams(32));
+		DFEVar runCycleCount = runCycleCounter.getCount();
+
+		// Counter for number of hits read for this state
 		Params cParams = control.count.makeParams(32).withMax(iNHitsPerState);
 		Counter count = control.count.makeCounter(cParams);
 		count.getCount().setReportOnUnused(false);
@@ -76,8 +87,20 @@ public class KOneState_nHit extends Kernel{
 		// Do the update
 		TrajectoryState ts_up = updator.update(ts, hit, pf);
 
-		DFEStruct outData = ts_up.packForIO();
-		io.output("state_up", outData, ts_up.ioType());
+		// Idea for how to accumulate N best of using Reductions streamMinWithMetadata
+		DFEVar comparisonValue = hit.chiSquared() + lostHitPenalty * hit.lostHits(); // TODO implement all of these
+		List<Reductions.ReducedStreamInfo<DFEStruct>> bestStateReductions = (new BestOfStreamWithMetadata<DFEStruct>(this, BestOfStream.Mode.MIN, maxStates, comparisonValue, ts_up.packForIO())).best();
+		List<DFEStruct> bestStates = new ArrayList<DFEStruct>();
+		for(Reductions.ReducedStreamInfo<DFEStruct> stateReduction : bestStateReductions){
+			bestStates.add(stateReduction.getMetaData());
+		}
+
+		DFEVar readOutEnable = runCycleCount >= nHitsTotal;
+		Counter readOutSelect = control.count.makeCounter(control.count.makeParams(3).withEnable(readOutEnable).withMax(maxStates));
+
+		DFEStruct outData = control.mux(readOutSelect.getCount(), bestStates);
+
+		io.output("state_up", outData, ts_up.ioType(), readOutEnable);
 
 		xData.simWatch("X");
 		hit.pos().watch("hit_pos");

@@ -18,7 +18,6 @@ public class KFUpdator extends KernelLib{
 	Kernel owner;
 
 	private static class lowLatencyInvert implements Inverter{
-		@Override
 		public DFEVar invert(DFEVar x){
 			return division.Divider.reducedLUTDivideFloat(x, 11, 25);
 		}
