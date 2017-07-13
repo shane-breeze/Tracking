@@ -295,8 +295,7 @@ public class KF4 extends KFWorker{
 		System.out.println("pdd00_trunk " + numerator0Trunc);*/
 		//div0.setSimWatch("pdd00");
 		//Divider.setWatch(true);
-		Divider div = new Divider(this.getKernel());
-		DFEVar denominator0 = div.reducedLUTDivideIgnore(numerator0Trunc, 11, 13, 35, 35, 6).cast(dfeRawBits(nPdd00InvIntBits + nPdd00InvFracBits)).cast(tPdd00Inv);
+		DFEVar denominator0 = Divider.reducedLUTDivideIgnore(numerator0Trunc, 11, 13, 35, 35, 6).cast(dfeRawBits(nPdd00InvIntBits + nPdd00InvFracBits)).cast(tPdd00Inv);
 		//Divider.setWatch(false);
 		//DFEVar denominator0 = Divider.divInt18_1BRAM_2DSP(numerator0Trunc).cast(dfeRawBits(nPdd00InvIntBits + nPdd00InvFracBits)).cast(tPdd00Inv);
 		//optimization.pushFixOpMode(Optimization.bitSizeExact(nPdd00InvIntBits + nPdd00InvFracBits), Optimization.offsetExact(-nPdd00InvFracBits), MathOps.DIV);
@@ -345,8 +344,7 @@ public class KF4 extends KFWorker{
 		//optimization.pushFixOpMode(Optimization.bitSizeExact(nPdd11InvIntBits + nPdd11InvFracBits), Optimization.offsetExact(-nPdd11InvFracBits), MathOps.DIV);
 		//DFEVar denominator1 = 1 / numerator1Trunc;
 		//DFEVar denominator1 = Divider.divInt18_1BRAM_2DSP(numerator1Trunc).cast(dfeRawBits(nPdd11InvIntBits + nPdd11InvFracBits)).cast(tPdd11Inv);
-		Divider div11 = new Divider(getKernel());
-		DFEVar denominator1 = div11.reducedLUTDivideIgnore(numerator1Trunc, 11, 13, 35, 35, 6).cast(dfeRawBits(nPdd11InvIntBits + nPdd11InvFracBits)).cast(tPdd11Inv);
+		DFEVar denominator1 = Divider.reducedLUTDivideIgnore(numerator1Trunc, 11, 13, 35, 35, 6).cast(dfeRawBits(nPdd11InvIntBits + nPdd11InvFracBits)).cast(tPdd11Inv);
 
 		//optimization.popFixOpMode(MathOps.DIV);
 		data[0][0] = denominator0;

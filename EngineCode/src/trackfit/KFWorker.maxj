@@ -182,19 +182,19 @@ public abstract class KFWorker extends KernelLib{
 		System.out.println("phi58 = " + phi58);
 		DFEVar cBin = Constants.phi58ToC(phi58);
 		FOM cBinFOM = new FOM(State.metadata.CBIN_HT.type());
-		FOM.WPVar cBinBounded = cBinFOM.wrapProtectedCast(cBin);
+		FOM.WPVar cBinBounded = cBinFOM.wrapProtectedCast(KernelMath.floor(cBin));
 		DFEVar cBinCompatible = cBinBounded.x() === stateIn.metadata(State.metadata.CBIN_HT.name());
 
 		// mBin Second
 		DFEVar mBin = Constants.inv2RToM(xaTrunc.data(0));
 		FOM mBinFOM = new FOM(State.metadata.MBIN_HT.type());
-		FOM.WPVar mBinBounded = mBinFOM.wrapProtectedCast(mBin);
+		FOM.WPVar mBinBounded = mBinFOM.wrapProtectedCast(KernelMath.floor(mBin));
 		DFEVar mBinCompatible = mBinBounded.x() === stateIn.metadata(State.metadata.MBIN_HT.name());
 
 		DFEVar mcBinCompatible = cBinCompatible & mBinCompatible;
 		DFEStruct mcBin = State.stMCBin().newInstance(this);
-		mcBin[State.MCBin.CBIN.name()] <== cBinBounded;
-		mcBin[State.MCBin.MBIN.name()] <== mBinBounded;
+		mcBin[State.MCBin.CBIN.name()] <== cBinBounded.x();
+		mcBin[State.MCBin.MBIN.name()] <== mBinBounded.x();
 		mcBin[State.MCBin.MCCOMPATIBLE.name()] <== mcBinCompatible;
 
 		/*--- Eta sector compatibility ---*/
