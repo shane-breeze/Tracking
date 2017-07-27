@@ -33,7 +33,6 @@ public class KFUpdator extends KernelLib{
 
 		Vector x = state.vector();
 		Matrix C = state.matrix();
-
 		Vector r = hit.pos();
 		Vector rMeas = (Vector) (H.H(owner) * x);
 

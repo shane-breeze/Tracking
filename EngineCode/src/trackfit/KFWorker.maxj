@@ -145,7 +145,7 @@ public abstract class KFWorker extends KernelLib{
 		xa.print();
 		DFEVar[] xaTruncStruct = new DFEVar[4];
 		for(int i = 0; i < 4; i++){
-			xaTruncStruct[i] = State.vector.values()[i].fom().wrapProtectedCast(xa.data(i));
+			xaTruncStruct[i] = State.vector.values()[i].fom().wrapProtectedCast(xa.data(i)).x();
 		}
 		Vector xaTrunc = new Vector(xaTruncStruct);
 		/* Track Parameter update done */
@@ -181,34 +181,20 @@ public abstract class KFWorker extends KernelLib{
 		optimization.popFixOpMode(MathOps.MUL);
 		System.out.println("phi58 = " + phi58);
 		DFEVar cBin = Constants.phi58ToC(phi58);
-		DFEVar cBinFloor = KernelMath.floor(cBin).cast(State.metadata.CBIN_HT.type());
-		int cBinMinVal = (int) - Math.pow(2, State.metadata.CBIN_HT.type().getTotalBits() - 1);
-		int cBinMaxVal = (int) Math.pow(2,State.metadata.CBIN_HT.type().getTotalBits() - 1);
-		int cBinFloorMaxVal = cBinMaxVal - 1;
-		DFEVar cBinTooLow = cBin < cBinMinVal;
-		DFEVar cBinTooHigh = cBin >= cBinMaxVal;
-		DFEVar cBinBoundedL = cBinTooLow ? cBinMinVal : cBinFloor;
-		DFEVar cBinBoundedH = cBinTooHigh > cBinFloorMaxVal ? cBinMaxVal : cBinFloor;
-		DFEVar cBinBounded = cBin < 0 ? cBinBoundedL : cBinBoundedH;
-		DFEVar cBinCompatible = cBinBounded === stateIn.metadata(State.metadata.CBIN_HT.name());
+		FOM cBinFOM = new FOM(State.metadata.CBIN_HT.type());
+		FOM.WPVar cBinBounded = cBinFOM.wrapProtectedCast(KernelMath.floor(cBin));
+		DFEVar cBinCompatible = cBinBounded.x() === stateIn.metadata(State.metadata.CBIN_HT.name());
 
 		// mBin Second
 		DFEVar mBin = Constants.inv2RToM(xaTrunc.data(0));
-		DFEVar mBinFloor = KernelMath.floor(mBin).cast(State.metadata.MBIN_HT.type());
-		int mBinMinVal = (int) - Math.pow(2, State.metadata.MBIN_HT.type().getTotalBits() - 1);
-		int mBinMaxVal = (int) Math.pow(2, State.metadata.MBIN_HT.type().getTotalBits() - 1);
-		int mBinFloorMaxVal = mBinMaxVal - 1;
-		DFEVar mBinTooLow = mBin < mBinMinVal;
-		DFEVar mBinTooHigh = mBin >= mBinMaxVal;
-		DFEVar mBoundedL = mBinTooLow ? mBinMinVal : mBinFloor;
-		DFEVar mBoundedH = mBinTooHigh > mBinFloorMaxVal ? mBinMaxVal : mBinFloor;
-		DFEVar mBinBounded = mBin < 0 ? mBoundedL : mBoundedH;
-		DFEVar mBinCompatible = mBinBounded === stateIn.metadata(State.metadata.MBIN_HT.name());
+		FOM mBinFOM = new FOM(State.metadata.MBIN_HT.type());
+		FOM.WPVar mBinBounded = mBinFOM.wrapProtectedCast(KernelMath.floor(mBin));
+		DFEVar mBinCompatible = mBinBounded.x() === stateIn.metadata(State.metadata.MBIN_HT.name());
 
 		DFEVar mcBinCompatible = cBinCompatible & mBinCompatible;
 		DFEStruct mcBin = State.stMCBin().newInstance(this);
-		mcBin[State.MCBin.CBIN.name()] <== cBinBounded;
-		mcBin[State.MCBin.MBIN.name()] <== mBinBounded;
+		mcBin[State.MCBin.CBIN.name()] <== cBinBounded.x();
+		mcBin[State.MCBin.MBIN.name()] <== mBinBounded.x();
 		mcBin[State.MCBin.MCCOMPATIBLE.name()] <== mcBinCompatible;
 
 		/*--- Eta sector compatibility ---*/
@@ -240,7 +226,7 @@ public abstract class KFWorker extends KernelLib{
 		}
 		z50LMem.setContents(z50Ls);
 		z50HMem.setContents(z50Hs);
-		DFEVar etaPhiSectorCompatible = etaCompatible & ~(cBinTooHigh | cBinTooLow);
+		DFEVar etaPhiSectorCompatible = etaCompatible & ~cBinBounded.wrapped();
 		/* Perform cuts on the chi squared and z0 value */
 		// If there is only 0 or 1 stub, it is not cut
 		optimization.pushFixOpMode(Optimization.bitSizeExact(stateIn.metadata("LAYERID").getType().getTotalBits() + 1), Optimization.offsetExact(0), MathOps.SUB);
@@ -261,7 +247,7 @@ public abstract class KFWorker extends KernelLib{
 		cuts[State.Cuts.ChiSquaredCut.name()] <== χSqCut;
 		cuts[State.Cuts.pTCut.name()] <== ptCut;
 		cuts[State.Cuts.z0Cut.name()] <== z0Cut;
-		cuts[State.Cuts.mBinInRange.name()] <== (mBinTooLow | mBinTooHigh);
+		cuts[State.Cuts.mBinInRange.name()] <== mBinBounded.wrapped();
 		cuts[State.Cuts.sufficientPS.name()] <== sufficientPS;
 		cuts[State.Cuts.SectorCut.name()] <== constant.var(dfeUInt(1), 1);
 

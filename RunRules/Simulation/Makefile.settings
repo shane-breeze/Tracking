@@ -8,10 +8,10 @@ RUNRULE_ARGS        :=
 RUNRULE_RUNENV      := MAXELEROSDIR="$(MAXCOMPILERDIR)/lib/maxeleros-sim" LD_LIBRARY_PATH="$(MAXCOMPILERDIR)/lib/maxeleros-sim/lib:$$LD_LIBRARY_PATH" SLIC_CONF="use_simulation=TrackingSimula;"  
 RUNRULE_MAXFILES    := single_updator_sim.max  
 RUNRULE_MAXFILES_H  := single_updator_sim.h 
-RUNRULE_CFLAGS      := 
-RUNRULE_LDFLAGS     := 
+RUNRULE_CFLAGS      :=  -fPIC 
+RUNRULE_LDFLAGS     :=  -shared 
 
-TARGET_EXEC         := DefaultApplication
-TARGET_LIBRARY      := 
+TARGET_EXEC         := 
+TARGET_LIBRARY      := single_updator_sim.so
 
 

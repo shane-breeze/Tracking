@@ -15,7 +15,9 @@ public class TrackingRecHit {
 
 	public enum label{
 		POS ("pos"),
-		ERRORS ("errors");
+		ERRORS ("errors"),
+		CHISQUARED ("chiSquared"),
+		LOSTHITS ("lostHits");
 		private final String label;
 		private label(String label){
 			this.label = label;
@@ -25,21 +27,30 @@ public class TrackingRecHit {
 
 	private final Vector pos;
 	private final SymMatrix<DFEVar> errors;
+	private final Vector chiSquared; // Compatibility with state
+	private final Vector lostHits;
 
 	public TrackingRecHit(DFEStruct data){
 		this.pos = new Vector((DFEVector<DFEVar>) data.get(label.POS.label()));
 		this.errors = new SymMatrix<DFEVar>(data.getKernel(), ((DFEVector<DFEVar>) data.get(label.ERRORS.label())).getElementsAsList());
+		this.chiSquared = new Vector((DFEVector<DFEVar>) data.get(label.CHISQUARED.label()));
+		this.lostHits = new Vector((DFEVector<DFEVar>) data.get(label.LOSTHITS.label()));
 	}
 
 	public static DFEStructType ioType(DFEType T, int D){
 		DFEVectorType<DFEVar> tErrors = SymMatrix.ioType(T, D);
 		DFEVectorType<DFEVar> tPos = new DFEVectorType<DFEVar>(T, D);
+		DFEVectorType<DFEVar> tScalar = new DFEVectorType<DFEVar>(T, 1);
 		StructFieldType sftPos = new StructFieldType(label.POS.label(), tPos);
 		StructFieldType sftErrors = new StructFieldType(label.ERRORS.label(), tErrors);
-		DFEStructType tRecHit = new DFEStructType(sftPos, sftErrors);
+		StructFieldType sftCS = new StructFieldType(label.CHISQUARED.label(), tScalar);
+		StructFieldType sftLH = new StructFieldType(label.LOSTHITS.label(), tScalar);
+		DFEStructType tRecHit = new DFEStructType(sftPos, sftErrors, sftCS, sftLH);
 		return tRecHit;
 	}
 
 	public Vector pos(){ return pos; }
 	public SymMatrix<DFEVar> errors(){ return errors; }
+	public DFEVar chiSquared(){ return chiSquared.data(0); }
+	public DFEVar lostHits(){ return lostHits.data(0); }
 }
