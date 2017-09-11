@@ -54,7 +54,7 @@ public class KFUpdator extends KernelLib{
 
 		Vector x_up = x + (Vector) (K * r);
 
-		Matrix C_up = (Matrix) (M * C * M) + (Matrix) (K * V.matrix() * LinAlg.transpose(K));
+		Matrix C_up = (Matrix) (M * C * LinAlg.transpose(M)) + (Matrix) (K * V.matrix() * LinAlg.transpose(K));
 
 		return new TrajectoryState(x_up, C_up);
 	}
