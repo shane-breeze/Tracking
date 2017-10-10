@@ -8,6 +8,7 @@ import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEType;
 import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFETypeFactory;
 import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStructType;
 import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStructType.StructFieldType;
+import com.maxeler.maxcompiler.v2.managers.BuildConfig;
 import com.maxeler.maxcompiler.v2.managers.custom.CustomManager;
 import com.maxeler.maxcompiler.v2.managers.custom.DFELink;
 import com.maxeler.maxcompiler.v2.managers.custom.blocks.KernelBlock;
@@ -21,36 +22,47 @@ import formats.TrajectoryState;
 public class MOneState_nHit extends CustomManager{
 
 	public static void main(String[] args){
+		int fClk = Integer.parseInt(System.getenv("clockFrequency"));
+		int nKernels = Integer.parseInt(System.getenv("nKernels"));
 		EngineParameters params = new EngineParameters();
-		MOneState_nHit m = new MOneState_nHit(params);
-		m.createSLiCinterface(interfaceDefault());
+		MOneState_nHit m = new MOneState_nHit(params, nKernels);
+		BuildConfig bc = new BuildConfig(m.getBuildConfig().getBuildLevel());
+		bc.setMPPRParallelism(4);
+		bc.setMPPRCostTableSearchRange(1, 4);
+		m.setBuildConfig(bc);
+		m.config.setDefaultStreamClockFrequency(fClk);
+		m.createSLiCinterface(interfaceDefault(nKernels));
 		m.build();
 	}
 
-	public MOneState_nHit(EngineParameters params){
+	public MOneState_nHit(EngineParameters params, int nKernels){
 		super(params);
 
-		KOneState_nHit kernel = new KOneState_nHit(makeKernelParameters("KFUpdator"));
-		KernelBlock updator = addKernel(kernel);
+		for(int n = 0; n < nKernels; n++){
+			String s;
+			if(nKernels == 1){
+				s = "";
+			}else{
+				s = String.valueOf(n);
+			}
+			KOneState_nHit kernel = new KOneState_nHit(makeKernelParameters("KFUpdator"+s));
+			KernelBlock updator = addKernel(kernel);
 
-		DFELink inHit = addStreamFromCPU("hit");
-		DFELink inState = addStreamFromCPU("state");
-		DFELink inStateControl = addStreamFromCPU("nHits");
-		DFELink out = addStreamToCPU("state_up");
+			DFELink inHit = addStreamFromCPU("hit"+s);
+			DFELink inState = addStreamFromCPU("state"+s);
+			DFELink inStateControl = addStreamFromCPU("nHits"+s);
+			DFELink out = addStreamToCPU("state_up"+s);
 
-		updator.getInput("hit") <== inHit;
-		updator.getInput("state") <== inState;
-		updator.getInput("nHits") <== inStateControl;
-		out <== updator.getOutput("state_up");
+			updator.getInput("hit") <== inHit;
+			updator.getInput("state") <== inState;
+			updator.getInput("nHits") <== inStateControl;
+			out <== updator.getOutput("state_up");
+		}
 	}
 
-    private static EngineInterface interfaceDefault(){
+    private static EngineInterface interfaceDefault(int nKernels){
         EngineInterface ei = new EngineInterface();
-        InterfaceParam n = ei.addParam("nHits",CPUTypes.INT32); // Number of hits
-        InterfaceParam m = ei.addParam("nStates", CPUTypes.INT32); // Number of states
-        // Note: the state is wide enough for a PCIE transaction, but state control is not
-        // In principal nControls = m, but sometimes needs rounding up to next PCIE transaction size
-        InterfaceParam nControls = ei.addParam("nStateControls", CPUTypes.INT32); // Number of state controls
+
 
         DFEType T = DFETypeFactory.dfeFloat(8, 24);
 
@@ -65,14 +77,27 @@ public class MOneState_nHit extends CustomManager{
 		DFEStructType tHit = Misc.addPCIEPadding(new StructFieldType[]{sftHit}).data();
 		int nHit = tHit.getTotalBytes();
 
-		ei.setTicks("KFUpdator", n);
-        ei.setStream("state", CPUTypes.FLOAT, nStateIn * m);
-        ei.setStream("nHits", CPUTypes.UINT32, CPUTypes.UINT32.sizeInBytes() * nControls);
-        ei.setStream("hit", CPUTypes.FLOAT, nHit * n);
-        ei.setStream("state_up", CPUTypes.FLOAT, nStateOut * n);
-        ei.setScalar("KFUpdator", "nHits_ZLI_inputLength", nControls);
-        ei.setScalar("KFUpdator", "state_ZLI_inputLength", m);
-        ei.setScalar("KFUpdator", "nHitsTotal", n);
+		for(int nK = 0; nK < nKernels; nK++){
+			String s;
+			if(nKernels == 1){
+				s = "";
+			}else{
+				s = String.valueOf(nK);
+			}
+	        InterfaceParam n = ei.addParam("nHits"+s, CPUTypes.INT32); // Number of hits
+	        InterfaceParam m = ei.addParam("nStates"+s, CPUTypes.INT32); // Number of states
+	        // Note: the state is wide enough for a PCIE transaction, but state control is not
+	        // In principal nControls = m, but sometimes needs rounding up to next PCIE transaction size
+	        InterfaceParam nControls = ei.addParam("nStateControls"+s, CPUTypes.INT32); // Number of state controls
+			ei.setTicks("KFUpdator"+s, n);
+			ei.setStream("state"+s, CPUTypes.FLOAT, nStateIn * m);
+			ei.setStream("nHits"+s, CPUTypes.UINT32, CPUTypes.UINT32.sizeInBytes() * nControls);
+			ei.setStream("hit"+s, CPUTypes.FLOAT, nHit * n);
+			ei.setStream("state_up"+s, CPUTypes.FLOAT, nStateOut * n);
+			ei.setScalar("KFUpdator"+s, "nHits_ZLI_inputLength", nControls);
+			ei.setScalar("KFUpdator"+s, "state_ZLI_inputLength", m);
+			ei.setScalar("KFUpdator"+s, "nHitsTotal", n);
+		}
         return ei;
     }
 }
