@@ -1,0 +1,229 @@
+package propagation;
+
+import static matrix.Vector.cross;
+import static matrix.Vector.dot;
+import matrix.Matrix;
+import matrix.Vector;
+
+import com.maxeler.maxcompiler.v2.kernelcompiler.Kernel;
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelLib;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.KernelMath;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
+
+// https://github.com/cms-sw/cmssw/blob/master/TrackingTools/AnalyticalJacobians/src/AnalyticalCurvilinearJacobianSSE.icc
+public class AnalyticalCurvilinearJacobian extends KernelLib{
+
+	DFEType normType = dfeFloat(8, 24);
+
+	public AnalyticalCurvilinearJacobian(Kernel owner, Vector globalPosition, Vector globalMomentum, Vector x, Vector p, Vector h, DFEVar s){
+		super(owner);
+
+		Vector p1 = globalMomentum.unit(normType); // TODO decide norm type: should be big enough to hold expected momentum range
+		Vector p2 = p.unit(normType);
+		Vector xStart = globalPosition;
+		Vector dx = xStart - x;
+
+		DFEVar qbp = globalMomentum.normReciprocal(normType);//globalMomentum.signedInverseMomentum(); // TODO implement signed inverse momentum
+		DFEVar absS = s;
+
+		// calculate transport matrix
+		// Origin: TRPRFN
+		//DFEVar t11 = p1.data(0); DFEVar t12 = p1.data(1); DFEVar t13 = p1.data(2);
+		//DFEVar t21 = p2.data(0); DFEVar t22 = p2.data(1); DFEVar t23 = p2.data(2);
+		DFEVar cosl0 = p1.subVec(0, 1).norm(normType);
+		DFEVar cosl1 = 1/p2.subVec(0, 1).norm(normType);
+
+		// define average magnetic field and gradient at initial point - inlike TRPRFN
+		Vector hn = h.unit(normType);
+		DFEVar qp = -h.norm(normType); // TODO check norm() equivalent to mag()
+		DFEVar q = qp * qbp;
+		DFEVar theta = q * absS;
+		DFEVar sint = KernelMath.sin(theta);
+		DFEVar cost = KernelMath.cos(theta); // TODO get cos from sin?
+
+		Vector t1 = p1;
+		Vector t2 = p2;
+		DFEVar gamma = Vector.dot(hn, t2);
+		Vector an = Vector.cross(hn, t2);
+		 // TODO u1, u2
+		Vector Z = new Vector(new DFEVar[]{constant.var(0), constant.var(0), constant.var(1)});
+		Vector zt1 = Vector.cross(Z, t1);
+		Vector zt2 = Vector.cross(Z, t2);
+		Vector u1 = zt1.unit(normType);
+		Vector u2 = zt2.unit(normType);
+		Vector u13 = u1;
+		Vector v1 = Vector.cross(t1, u13);
+		Vector u23 = u2;
+		Vector v2 = Vector.cross(t2, u23);
+
+
+		// Now prepare the transport matrix
+		DFEVar anv = - Vector.dot(hn, u23);
+		DFEVar anu = Vector.dot(hn, v2);
+
+		// Prepare some values used more than once
+		DFEVar omcost = 1 - cost; // 'One minus cos theta'
+		DFEVar tmsint = theta - sint; // 'theta minus sin theta'
+		DFEVar gamma_tmsint = tmsint * gamma;
+		DFEVar msint = -sint; // minus sin theta
+
+		Vector hu = cross(hn, u13);
+		Vector hv = cross(hn, v1);
+
+		DFEVar hnu1 = dot(hn, u1);
+		DFEVar hnu2 = dot(hn, u2);
+		DFEVar hnv1 = dot(hn, v1);
+		DFEVar hnv2 = dot(hn, v2);
+		DFEVar tmsint_hnu1 = tmsint * hnu1;
+		DFEVar tmsint_hnu2 = tmsint * hnu2;
+		DFEVar tmsint_hnv1 = tmsint * hnv1;
+		DFEVar tmsint_hnv2 = tmsint * hnv2;
+
+		DFEVar huu2 = dot(hu, u2);
+		DFEVar huv2 = dot(hu, v2);
+
+		DFEVar hvv1 = dot(hv, v2);
+		DFEVar hvv2 = dot(hv, v2);
+		DFEVar hvu2 = dot(hv, u2);
+
+		DFEVar u1u2 = dot(u1, u2);
+		DFEVar u1v2 = dot(u1, v2);//.subVec(0, 1));
+		DFEVar u1t2 = dot(u1, t2);//.subVec(0, 1));
+		DFEVar u1an = dot(u1, an);//.subVec(0, 1));
+		DFEVar u2dx = dot(u2, dx);//.subVec(0, 1));
+		DFEVar v2dx = dot(v2, dx);//.subVec(0, 1));
+		DFEVar gamma_tmsint_hnv1 = gamma_tmsint * hnv1;
+		DFEVar gamma_tmsint_hnu1 = gamma_tmsint * hnu1;
+
+		DFEVar v1v2 = dot(v1, v2);
+		DFEVar v1t2 = dot(v1, t2);
+		DFEVar v1an = dot(v1, an);
+		DFEVar v1u2 = dot(v1, u2);
+		DFEVar t2dx = dot(t2, dx);
+		DFEVar anu_cosl1 = anu * cosl1;
+		DFEVar mq_anu_cosl1 = -q * anu_cosl1;
+		DFEVar mqp_anu_cosl1 = -qp * anu_cosl1;
+
+		// Construct the Jacobian
+
+		DFEVar[][] J = new DFEVar[5][5];
+		for(int i = 0; i < 5; i++)
+			for(int j = 0; j < 5; j++)
+				J[i][j] = constant.var(1);
+
+		J[0][0] = constant.var(1);
+		for(int i = 0; i < 5; i++)
+			J[0][i] = constant.var(0);
+
+		J[1][0] = -qp * anv * t2dx;
+
+		J[1][1] = cost * v1v2 +
+				  sint * hvv2 +
+				  omcost * hnv1 * hnv2 +
+				  anv * (msint * v1t2 +
+						  omcost * v1an -
+						  gamma_tmsint_hnv1);
+
+		J[1][2] = (cost * u1v2 +
+				  sint * huv2 +
+				  omcost * hnu1 * hnv2 +
+				  anv * (msint * u1t2 +
+						  omcost * u1an -
+						  gamma_tmsint_hnu1 )) * cosl0;
+
+		J[1][3] = -q * anv * u1t2;
+
+		J[1][4] = -q * anv * v1t2;
+
+		// phi
+		J[2][0] = mqp_anu_cosl1 * t2dx;
+
+		J[2][1] = (cost * v1u2 +
+				   sint * hvu2 +
+				   omcost * hnv1 * hnu2 +
+				   anu * (msint * v1t2 + omcost * v1an -
+						   gamma_tmsint_hnv1));
+
+		J[2][2] = (cost * u1u2 +
+				   sint * huu2 +
+				   omcost * hnu1 * hnu2 +
+				   anu * (msint * u1t2 +
+						  omcost * u1an - gamma_tmsint_hnu1)
+				) * cosl1 * cosl0;
+
+		J[2][3] = mq_anu_cosl1 * u1t2;
+		J[2][4] = mq_anu_cosl1 * v1t2;
+
+		DFEVar overQ = 1/q; // TODO inverter
+		DFEVar cosl0_overQ = cosl0 * overQ;
+
+		// y_t
+		J[3][1] = (sint * v1u2 +
+				   omcost * hvu2 + tmsint_hnv1 * hnu2) *
+				   overQ;
+
+		J[3][2] = (sint * u1u2 + omcost * huu2 +
+				   tmsint_hnu1 * hnu2) * cosl0_overQ;
+
+		J[3][3] = u1u2;
+
+		J[3][4] = v1u2;
+
+		// z_t
+		J[4][1] = (sint * v1v2 + omcost * hvv2 +
+				   tmsint_hnv1 * hnv2) * overQ;
+
+		J[4][2] = (sint * u1v2 + omcost * huv2 +
+				   tmsint_hnu1 * hnv2) * cosl0_overQ;
+
+		J[4][3] = u1v2;
+
+		J[4][4] = v1v2;
+
+		// dx/d(q/p) and dy/d(q/p) are unstable for small s or theta
+		// An approximate, but more stable formulation is used for small s or theta
+		// For the exact version:
+		DFEVar pp = 1/qbp;
+		DFEVar J30_exact = pp * u2dx;
+		DFEVar J40_exact = pp * v2dx;
+
+		// For the approximate version:
+		Vector hp1 = cross(hn, t1);
+		DFEVar temp1 = dot(hp1.subVec(0, 1), u2);
+		Vector ghnmp = new Vector(new DFEVar[]{gamma * hn.data(0), gamma * hn.data(1), gamma * hn.data(2)}) - t1;
+		//Vector ghnmp = ((new Scalar(gamma)) * hn) - t1;
+		DFEVar temp2 = dot(ghnmp, u2);
+
+		DFEVar qps = qp * s;
+		DFEVar h2 = qps * qbp;
+		DFEVar h3 = -0.1245 * h2;
+
+		DFEVar secondOrder41 = 0.5 * temp1;
+		DFEVar thirdOrder41 = (1./3.) * temp2;
+		DFEVar fourthOrder41 = h3 * temp1;
+
+		DFEVar J30_approx = (s * qps) * (secondOrder41 + h2*(thirdOrder41 + fourthOrder41));
+
+		DFEVar temp3 = dot(hp1, v1);
+		DFEVar temp4 = dot(ghnmp, v2);
+
+		DFEVar secondOrder51 = 0.5 * temp3;
+		DFEVar thirdOrder51 = (1./3.) * temp4;
+		DFEVar fourthOrder51 = h3 * temp3;
+		DFEVar J40_approx = (s * qps) * (secondOrder51 + h2*(thirdOrder51 + fourthOrder51));
+
+		DFEVar cutCriterion = KernelMath.abs(s * qbp);
+		DFEVar cut = cutCriterion > 5;
+		J[3][0] = J30_exact.getType().newInstance(this);
+		J[4][0] = J40_exact.getType().newInstance(this);
+		J[3][0] <== cut ? J30_exact : J30_approx;
+		J[4][0] <== cut ? J40_exact : J40_approx;
+
+		Jacobian = new Matrix(J);
+	}
+
+	Matrix Jacobian;
+
+	public Matrix Jacobian(){ return this.Jacobian; }
+}

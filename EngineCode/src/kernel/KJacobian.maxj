@@ -1,0 +1,64 @@
+package kernel;
+
+import matrix.Matrix;
+import matrix.Vector;
+import propagation.AnalyticalCurvilinearJacobian;
+
+import com.maxeler.maxcompiler.v2.kernelcompiler.Kernel;
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelParameters;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEVector;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEVectorType;
+
+public class KJacobian extends Kernel{
+
+	public KJacobian(KernelParameters params){
+		super(params);
+
+		// In type: globalParams.p, globalParams.x, x, p, h, s
+		DFEVectorType<DFEVar> tVIn = new DFEVectorType<DFEVar>(dfeFloat(8, 24), 16);
+		DFEVector<DFEVar> vIn = io.input("vIn", tVIn);
+		int iIn = 0;
+		DFEVar[] globPos = new DFEVar[3];
+		for(int i = 0; i < 3; i++)
+			globPos[i] = vIn[iIn++];
+		Vector globalPosition = new Vector(globPos);
+
+		DFEVar[] globMom = new DFEVar[3];
+		for(int i = 0; i < 3; i++)
+			globMom[i] = vIn[iIn++];
+		Vector globalMomentum = new Vector(globMom);
+
+		DFEVar[] xA = new DFEVar[3];
+		for(int i = 0; i < 3; i++)
+			xA[i] = vIn[iIn++];
+		Vector x = new Vector(xA);
+
+		DFEVar[] pA = new DFEVar[3];
+		for(int i = 0; i < 3; i++)
+			pA[i] = vIn[iIn++];
+		Vector p = new Vector(pA);
+
+		DFEVar[] hA = new DFEVar[3];
+		for(int i = 0; i < 3; i++)
+			hA[i] = vIn[iIn++];
+		Vector h = new Vector(hA);
+
+		DFEVar s = vIn[iIn++];
+
+		Matrix J = new AnalyticalCurvilinearJacobian(this, globalPosition, globalMomentum, x, p, h, s).Jacobian();
+
+		DFEVectorType<DFEVar> tVOut = new DFEVectorType<DFEVar>(dfeFloat(8, 24), 32);
+		DFEVector<DFEVar> vOut = tVOut.newInstance(this);
+		int iOut = 0;
+		for(int i = 0; i < 5; i++){
+			for(int j = 0; j < 5; j++){
+				vOut[iOut++] <== J.data(i, j).cast(dfeFloat(8, 24));
+			}
+		}
+		while(iOut < 32)
+			vOut[iOut++] <== constant.var(dfeFloat(8, 24), 0);
+		io.output("J", vOut, tVOut);
+	}
+
+}

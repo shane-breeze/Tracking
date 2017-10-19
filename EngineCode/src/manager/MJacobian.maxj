@@ -1,0 +1,45 @@
+package manager;
+
+import kernel.KJacobian;
+
+import com.maxeler.maxcompiler.v2.build.EngineParameters;
+import com.maxeler.maxcompiler.v2.managers.custom.CustomManager;
+import com.maxeler.maxcompiler.v2.managers.custom.DFELink;
+import com.maxeler.maxcompiler.v2.managers.custom.blocks.KernelBlock;
+import com.maxeler.maxcompiler.v2.managers.engine_interfaces.CPUTypes;
+import com.maxeler.maxcompiler.v2.managers.engine_interfaces.EngineInterface;
+import com.maxeler.maxcompiler.v2.managers.engine_interfaces.InterfaceParam;
+
+public class MJacobian extends CustomManager{
+
+	public static void main(String[] args){
+		EngineParameters params = new EngineParameters();
+		MJacobian m = new MJacobian(params);
+		m.createSLiCinterface(interfaceDefault());
+		m.build();
+	}
+
+	public MJacobian(EngineParameters params){
+		super(params);
+
+		this.getCurrentKernelConfig().debug.setEnableLatencyAnnotation(true);
+		KernelBlock jacobianCalculator = addKernel(new KJacobian(makeKernelParameters("JacobianCalculator")));
+
+		DFELink in = addStreamFromCPU("paramsIn");
+		DFELink out = addStreamToCPU("jacobian");
+
+		jacobianCalculator.getInput("vIn") <== in;
+		out <== jacobianCalculator.getOutput("J");
+	}
+
+    private static EngineInterface interfaceDefault(){
+        EngineInterface ei = new EngineInterface();
+        InterfaceParam n = ei.addParam("dataSize",CPUTypes.INT32); // Number of stubs
+        ei.setTicks("JacobianCalculator", n);
+
+        ei.setStream("paramsIn", CPUTypes.FLOAT, 16 * CPUTypes.FLOAT.sizeInBytes() * n);
+        ei.setStream("jacobian", CPUTypes.FLOAT, 32 * CPUTypes.FLOAT.sizeInBytes() * n);
+        return ei;
+    }
+
+}
