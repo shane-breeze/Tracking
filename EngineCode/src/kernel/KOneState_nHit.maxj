@@ -1,19 +1,15 @@
 package kernel;
 
-import java.util.ArrayList;
-import java.util.List;
-
 import kalman.KFUpdator;
 import kalman.ProjectMatrix;
 import matrix.SymMatrix;
 import matrix.Vector;
 import maxpower.kernel.io.ZeroLatencyInput;
 import misc.Misc;
-import sort.BestOfStream;
-import sort.BestOfStreamWithMetadata;
 
 import com.maxeler.maxcompiler.v2.kernelcompiler.Kernel;
 import com.maxeler.maxcompiler.v2.kernelcompiler.KernelParameters;
+import com.maxeler.maxcompiler.v2.kernelcompiler.op_management.MathOps;
 import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.Reductions;
 import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.Count.Counter;
 import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.Count.Params;
@@ -39,7 +35,8 @@ public class KOneState_nHit extends Kernel{
 	public KOneState_nHit(KernelParameters params){
 		super(params);
 		ProjectMatrix pf = new ProjectMatrix(new int[]{3, 4}, D, N); // Projection matrix H
-
+		double dspFactor = Double.parseDouble(System.getenv("dspFactor"));
+		optimization.pushDSPFactor(dspFactor, MathOps.ADD_SUB);
 		// Input the hit
 		StructFieldType sftHit = new StructFieldType("hit", TrackingRecHit.ioType(T, D));
 		DFEStructType tHit = Misc.addPCIEPadding(new StructFieldType[]{sftHit}).data();

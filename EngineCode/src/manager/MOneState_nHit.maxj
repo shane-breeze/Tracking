@@ -48,10 +48,10 @@ public class MOneState_nHit extends CustomManager{
 			KOneState_nHit kernel = new KOneState_nHit(makeKernelParameters("KFUpdator"+s));
 			KernelBlock updator = addKernel(kernel);
 
-			DFELink inHit = addStreamFromCPU("hit"+s);
-			DFELink inState = addStreamFromCPU("state"+s);
-			DFELink inStateControl = addStreamFromCPU("nHits"+s);
-			DFELink out = addStreamToCPU("state_up"+s);
+			DFELink inHit = addStreamFromCPU("hit"+s);//, StreamMode.LOW_LATENCY_ENABLED);
+			DFELink inState = addStreamFromCPU("state"+s);//, StreamMode.LOW_LATENCY_ENABLED);
+			DFELink inStateControl = addStreamFromCPU("nHits"+s);//, StreamMode.LOW_LATENCY_ENABLED);
+			DFELink out = addStreamToCPU("state_up"+s);//, StreamMode.LOW_LATENCY_ENABLED);
 
 			updator.getInput("hit") <== inHit;
 			updator.getInput("state") <== inState;
