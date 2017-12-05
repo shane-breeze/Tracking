@@ -1,0 +1,128 @@
+package manager;
+
+import kernel.KOneState_nHitFMEM;
+import misc.Misc;
+
+import com.maxeler.maxcompiler.v2.build.EngineParameters;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFETypeFactory;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStructType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEStructType.StructFieldType;
+import com.maxeler.maxcompiler.v2.managers.BuildConfig;
+import com.maxeler.maxcompiler.v2.managers.custom.CustomManager;
+import com.maxeler.maxcompiler.v2.managers.custom.DFELink;
+import com.maxeler.maxcompiler.v2.managers.custom.blocks.KernelBlock;
+import com.maxeler.maxcompiler.v2.managers.engine_interfaces.CPUTypes;
+import com.maxeler.maxcompiler.v2.managers.engine_interfaces.EngineInterface;
+import com.maxeler.maxcompiler.v2.managers.engine_interfaces.EngineInterface.Direction;
+import com.maxeler.maxcompiler.v2.managers.engine_interfaces.InterfaceParam;
+
+import formats.TrackingRecHit;
+import formats.TrajectoryState;
+
+public class MOneState_nHitFMEM extends CustomManager{
+
+	public static void main(String[] args){
+		int fClk = Integer.parseInt(System.getenv("clockFrequency"));
+		int nKernels = Integer.parseInt(System.getenv("nKernels"));
+		EngineParameters params = new EngineParameters();
+		MOneState_nHitFMEM m = new MOneState_nHitFMEM(params, nKernels);
+		BuildConfig bc = new BuildConfig(m.getBuildConfig().getBuildLevel());
+		bc.setMPPRParallelism(4);
+		bc.setMPPRCostTableSearchRange(1, 4);
+		m.setBuildConfig(bc);
+		m.config.setDefaultStreamClockFrequency(fClk);
+		m.createSLiCinterface(interfaceDefault(nKernels));
+		m.build();
+	}
+
+	public MOneState_nHitFMEM(EngineParameters params, int nKernels){
+		super(params);
+
+		for(int n = 0; n < nKernels; n++){
+			String s;
+			if(nKernels == 1){
+				s = "";
+			}else{
+				s = String.valueOf(n);
+			}
+			KOneState_nHitFMEM kernel = new KOneState_nHitFMEM(makeKernelParameters("KFUpdator"+s));
+			KernelBlock updator = addKernel(kernel);
+
+			DFELink inHitID = addStreamFromCPU("hitAddr"+s);
+			DFELink inState = addStreamFromCPU("state"+s);
+			DFELink inStateControl = addStreamFromCPU("nHits"+s);
+			DFELink out = addStreamToCPU("state_up"+s);
+
+			updator.getInput("hitAddr") <== inHitID;
+			updator.getInput("state") <== inState;
+			updator.getInput("nHits") <== inStateControl;
+			out <== updator.getOutput("state_up");
+		}
+	}
+
+    private static EngineInterface interfaceDefault(int nKernels){
+        EngineInterface ei = new EngineInterface();
+
+
+        DFEType T = DFETypeFactory.dfeFloat(8, 24);
+
+		StructFieldType sftTrajectory = new StructFieldType("trajectoryState", TrajectoryState.ioType(T, 5));
+		//StructFieldType sftEOF = new StructFieldType("EOF", T);
+		DFEStructType tTrajectory = Misc.addPCIEPadding(new StructFieldType[]{sftTrajectory}).data();
+		int nStateIn = tTrajectory.getTotalBytes();
+
+		int nStateOut = TrajectoryState.ioType(T, 5).getTotalBytes();
+
+		StructFieldType sftHit = new StructFieldType("hit", TrackingRecHit.ioType(T, 2));
+		//DFEStructType tHit = Misc.addPCIEPadding(new StructFieldType[]{sftHit}).data();
+		//int nHit = tHit.getTotalBytes();
+		int nHit = DFETypeFactory.dfeUInt(16).getTotalBytes();
+
+		for(int nK = 0; nK < nKernels; nK++){
+			String s;
+			if(nKernels == 1){
+				s = "";
+			}else{
+				s = String.valueOf(nK);
+			}
+	        InterfaceParam n = ei.addParam("nHits"+s, CPUTypes.INT32); // Number of hits
+	        InterfaceParam m = ei.addParam("nStates"+s, CPUTypes.INT32); // Number of states
+	        // Note: the state is wide enough for a PCIE transaction, but state control is not
+	        // In principal nControls = m, but sometimes needs rounding up to next PCIE transaction size
+	        InterfaceParam nControls = ei.addParam("nStateControls"+s, CPUTypes.INT32); // Number of state controls
+			ei.setTicks("KFUpdator"+s, n);
+			ei.setStream("state"+s, CPUTypes.FLOAT, nStateIn * m);
+			ei.setStream("nHits"+s, CPUTypes.UINT32, CPUTypes.UINT32.sizeInBytes() * nControls);
+			ei.setStream("hitAddr"+s, CPUTypes.UINT32, nHit * n);
+			ei.setStream("state_up"+s, CPUTypes.FLOAT, nStateOut * n);
+			ei.setScalar("KFUpdator"+s, "nHits_ZLI_inputLength", nControls);
+			ei.setScalar("KFUpdator"+s, "state_ZLI_inputLength", m);
+			//ei.setScalar("KFUpdator"+s, "nHitsTotal", n);
+			for(int i = 0; i < 4; i++)
+				ei.ignoreMem("KFUpdator"+s, "hitROM" + i, Direction.IN);
+		}
+        return ei;
+    }
+
+    private static EngineInterface interfaceMappedROM(int nKernels){
+        EngineInterface ei = new EngineInterface();
+
+		for(int nK = 0; nK < nKernels; nK++){
+			String s;
+			if(nKernels == 1){
+				s = "";
+			}else{
+				s = String.valueOf(nK);
+			}
+			ei.ignoreStream("state"+s);
+			ei.ignoreStream("nHits"+s);
+			ei.ignoreStream("hitAddr"+s);
+			ei.ignoreStream("state_up"+s);
+			ei.ignoreScalar("KFUpdator"+s, "nHits_ZLI_inputLength");
+			ei.ignoreScalar("KFUpdator"+s, "state_ZLI_inputLength");
+			//ei.ignoreScalar("KFUpdator"+s, "nHitsTotal");
+		}
+        return ei;
+    }
+}
